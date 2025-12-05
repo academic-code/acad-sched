@@ -3,7 +3,7 @@
     v-model="show"
     :color="color"
     location="top right"
-    timeout="1000"
+    timeout="2000"
     rounded="lg"
     elevation="6"
     width="380"

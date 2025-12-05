@@ -5,7 +5,6 @@
 
     <!-- TOP BAR -->
     <div class="d-flex justify-space-between align-center mb-4">
-      <!-- SEARCH -->
       <v-text-field
         v-model="search"
         placeholder="Search dean..."
@@ -17,7 +16,6 @@
         class="mr-4"
       />
 
-      <!-- INVITE BUTTON -->
       <v-btn
         color="primary"
         prepend-icon="mdi-plus"
@@ -36,7 +34,7 @@
         :items-per-page="itemsPerPage"
         class="text-body-2"
       >
-        <!-- DEPARTMENT NAME COLUMN -->
+        <!-- DEPARTMENT -->
         <template #item.department="{ item }">
           {{ item.departments?.name || "—" }}
         </template>
@@ -76,7 +74,7 @@
           class="mb-3"
         />
 
-        <!-- EMAIL FIELD (ONLY WHEN CREATING) -->
+        <!-- EMAIL FIELD ONLY WHEN CREATING -->
         <v-text-field
           v-if="!isEditing"
           v-model="form.email"
@@ -119,7 +117,8 @@
       <v-card class="pa-4">
         <h3 class="text-h6 font-weight-medium mb-4">Delete Dean</h3>
 
-        <p>Are you sure you want to delete <b>{{ selected?.full_name }}</b>?</p>
+        <p>Are you sure you want to delete
+          <b>{{ selected?.users?.full_name }}</b>?</p>
 
         <div class="d-flex justify-end mt-4">
           <v-btn variant="text" @click="deleteDialog = false">Cancel</v-btn>
@@ -149,9 +148,7 @@ definePageMeta({ layout: "admin" })
 const { showAlert } = useAlert()
 const { $supabase } = useNuxtApp()
 
-/* -----------------------
-   STATE
------------------------ */
+/* STATE */
 const modal = ref(false)
 const deleteDialog = ref(false)
 const loading = ref(false)
@@ -166,41 +163,45 @@ const departments = ref([])
 
 const form = ref({
   id: null,
+  user_id: null,
   full_name: "",
   email: "",
-  department_id: "",
-  auth_id: null
+  department_id: ""
 })
 
-/* -----------------------
-   TABLE HEADERS
------------------------ */
+/* TABLE HEADERS */
 const headers = [
-  { title: "Full Name", key: "full_name" },
-  { title: "Email", key: "email" },
+  { title: "Full Name", key: "users.full_name" },
+  { title: "Email", key: "users.email" },
   { title: "Department", key: "department" },
   { title: "Actions", key: "actions", align: "center", sortable: false },
 ]
 
-/* -----------------------
-   FILTERED DATA
------------------------ */
+/* FILTER SEARCH */
 const filteredDeans = computed(() => {
   if (!search.value) return deans.value
 
   return deans.value.filter(d =>
-    d.full_name.toLowerCase().includes(search.value.toLowerCase()) ||
-    d.email.toLowerCase().includes(search.value.toLowerCase())
+    d.users?.full_name?.toLowerCase().includes(search.value.toLowerCase()) ||
+    d.users?.email?.toLowerCase().includes(search.value.toLowerCase())
   )
 })
 
-/* -----------------------
-   LOAD INITIAL DATA
------------------------ */
+/* LOAD DATA */
 async function loadDeans() {
   const { data, error } = await $supabase
     .from("deans")
-    .select("*, departments(name)")
+    .select(`
+      id,
+      department_id,
+      users:user_id (
+        id,
+        full_name,
+        email,
+        auth_user_id
+      ),
+      departments(name)
+    `)
 
   if (error) return showAlert("error", error.message)
   deans.value = data
@@ -216,9 +217,7 @@ onMounted(() => {
   loadDepartments()
 })
 
-/* -----------------------
-   OPEN MODALS
------------------------ */
+/* OPEN MODALS */
 function openCreate() {
   isEditing.value = false
   form.value = { id: null, full_name: "", email: "", department_id: "" }
@@ -229,17 +228,15 @@ function openEdit(item) {
   isEditing.value = true
   form.value = {
     id: item.id,
-    full_name: item.full_name,
-    email: item.email,
-    department_id: item.department_id,
-    auth_id: item.auth_id
+    user_id: item.users?.id,
+    full_name: item.users?.full_name,
+    email: item.users?.email,
+    department_id: item.department_id
   }
   modal.value = true
 }
 
-/* -----------------------
-   SAVE — CREATE OR UPDATE
------------------------ */
+/* SAVE */
 async function save() {
   loading.value = true
 
@@ -258,15 +255,11 @@ async function save() {
     return showAlert("error", "Please select a department.")
   }
 
-  // CREATE (invite dean)
+  // CREATE
   if (!isEditing.value) {
     const res = await $fetch("/api/invite-dean", {
       method: "POST",
-      body: {
-        email: form.value.email,
-        full_name: form.value.full_name,
-        department_id: form.value.department_id
-      }
+      body: form.value
     })
 
     loading.value = false
@@ -279,26 +272,22 @@ async function save() {
   }
 
   // UPDATE
-  const { error } = await $supabase
-    .from("deans")
-    .update({
-      full_name: form.value.full_name,
-      department_id: form.value.department_id
-    })
-    .eq("id", form.value.id)
+  await $supabase.from("users").update({
+    full_name: form.value.full_name,
+    department_id: form.value.department_id
+  }).eq("id", form.value.user_id)
+
+  await $supabase.from("deans").update({
+    department_id: form.value.department_id
+  }).eq("id", form.value.id)
 
   loading.value = false
-
-  if (error) return showAlert("error", error.message)
-
   modal.value = false
   showAlert("success", "Dean updated.")
   loadDeans()
 }
 
-/* -----------------------
-   DELETE
------------------------ */
+/* DELETE */
 function confirmDelete(item) {
   selected.value = item
   deleteDialog.value = true
@@ -307,18 +296,17 @@ function confirmDelete(item) {
 async function deleteDean() {
   loading.value = true
 
-  const res = await $fetch("/api/deans/delete", {
+  await $fetch("/api/deans/delete", {
     method: "DELETE",
     body: {
-      id: selected.value.id,
-      auth_id: selected.value.auth_id
+      dean_id: selected.value.id,
+      user_id: selected.value.users?.id,
+      auth_user_id: selected.value.users?.auth_user_id
     }
   })
 
   loading.value = false
   deleteDialog.value = false
-
-  if (res.error) return showAlert("error", res.error)
 
   showAlert("success", "Dean deleted.")
   loadDeans()

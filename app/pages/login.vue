@@ -3,9 +3,10 @@
     <v-card class="pa-6" width="420" elevation="4">
       
       <!-- LOGO -->
-      <div class="text-center mb-4">
+        <div class="logo-wrapper">
         <v-img src="/Logo.png" width="85" height="85" contain />
-      </div>
+        </div>
+
 
       <h2 class="text-h6 text-center font-weight-bold mb-4">
         Academic Scheduler Login
@@ -160,6 +161,24 @@ onMounted(async () => {
   background: #f5f8fc;
   animation: fade 0.3s ease-in-out;
 }
+
+.logo-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+
+.logo-wrapper img {
+  transition: 0.3s ease;
+}
+
+.logo-wrapper:hover img {
+  transform: scale(1.06);
+}
+
 
 @keyframes fade {
   from {

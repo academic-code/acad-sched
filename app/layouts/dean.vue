@@ -1,5 +1,6 @@
 <template>
   <v-app>
+    <!-- SIDEBAR -->
     <v-navigation-drawer
       v-model="drawer"
       app
@@ -13,7 +14,7 @@
         <v-img src="/Logo.png" width="70" />
       </div>
 
-      <!-- SIDEBAR MENU -->
+      <!-- MENU -->
       <v-list nav density="comfortable">
         <v-list-item
           v-for="item in menu"
@@ -28,18 +29,19 @@
       </v-list>
     </v-navigation-drawer>
 
+    <!-- TOP BAR -->
     <v-app-bar app elevation="1" color="white">
       <v-btn icon variant="text" @click="drawer = !drawer">
         <v-icon color="primary">mdi-menu</v-icon>
       </v-btn>
 
       <v-toolbar-title class="ml-2 font-weight-medium text-grey-darken-3">
-        Admin Panel
+        Dean Panel
       </v-toolbar-title>
 
       <v-spacer />
 
-      <!-- PROFILE -->
+      <!-- PROFILE MENU -->
       <v-menu>
         <template #activator="{ props }">
           <v-btn icon variant="text" v-bind="props">
@@ -51,7 +53,7 @@
           <v-list-item>
             <v-list-item-title class="text-caption">
               {{ userEmail }}<br />
-              ({{ userRole }})
+              (Dean)
             </v-list-item-title>
           </v-list-item>
 
@@ -64,6 +66,7 @@
       </v-menu>
     </v-app-bar>
 
+    <!-- MAIN CONTENT -->
     <v-main class="bg-grey-lighten-4">
       <v-container fluid class="pa-6">
         <slot />
@@ -76,73 +79,49 @@
 
 <script setup>
 import { ref, onMounted } from "vue"
-import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
+import AppAlert from "~/components/AppAlert.vue"
 
-definePageMeta({ middleware: "auth" })
-
-const { showAlert } = useAlert()
 const supabase = useNuxtApp().$supabase
+const { showAlert } = useAlert()
 
 const drawer = ref(true)
 const isMobile = ref(false)
-
 const userEmail = ref("Loading...")
-const userRole = ref("")
 
+// Dean menu
 const menu = [
-  { label: "Dashboard", to: "/admin", icon: "mdi-view-dashboard" },
-  { label: "Departments", to: "/admin/departments", icon: "mdi-domain" },
-  { label: "Periods", to: "/admin/periods", icon: "mdi-clock-outline" },
-  { label: "Subjects", to: "/admin/subjects", icon: "mdi-book-open-page-variant" },
-  { label: "Teachers", to: "/admin/faculty", icon: "mdi-account-group-outline" },
-  { label: "Classes", to: "/admin/classes", icon: "mdi-google-classroom" },
-  { label: "Rooms", to: "/admin/rooms", icon: "mdi-door-sliding" },
-  { label: "Schedules", to: "/admin/schedules", icon: "mdi-calendar-clock" }
+  { label: "Dashboard", to: "/dean", icon: "mdi-view-dashboard" },
+  { label: "Faculty", to: "/dean/faculty", icon: "mdi-account-group" },
+  { label: "Classes", to: "/dean/classes", icon: "mdi-google-classroom" },
+  { label: "Subjects", to: "/dean/subjects", icon: "mdi-book-open-page-variant" },
+  { label: "Schedule", to: "/dean/schedule", icon: "mdi-calendar-clock" }
 ]
 
-async function loadUserData() {
+async function loadUser() {
   const { data } = await supabase.auth.getUser()
-  const user = data.user
-
-  if (!user) return navigateTo("/login")
-
-  userEmail.value = user.email || "Unknown"
-
-  // load role from users table
-  const { data: dbUser } = await supabase
-    .from("users")
-    .select("role")
-    .eq("auth_user_id", user.id)
-    .maybeSingle()
-
-  userRole.value = dbUser?.role || "UNKNOWN"
+  if (!data.user) return navigateTo("/login")
+  userEmail.value = data.user.email
 }
 
 async function logout() {
-  const { error } = await supabase.auth.signOut()
-
-  if (error) {
-    showAlert("error", "Logout failed.")
-    return
-  }
-
+  await supabase.auth.signOut()
   showAlert("success", "Logged out successfully.")
   navigateTo("/login")
 }
 
-onMounted(() => {
-  loadUserData()
+if (process.client) {
+  const updateSize = () => {
+    isMobile.value = window.innerWidth < 960
+    if (isMobile.value) drawer.value = false
+  }
 
-  if (process.client) {
-    const updateSize = () => {
-      isMobile.value = window.innerWidth < 960
-      if (isMobile.value) drawer.value = false
-    }
+  onMounted(() => {
+    loadUser()
     updateSize()
     window.addEventListener("resize", updateSize)
-  }
-})
+  })
+}
 </script>
 
 <style scoped>

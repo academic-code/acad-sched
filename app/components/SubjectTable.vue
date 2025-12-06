@@ -24,9 +24,23 @@
       clearable
     />
 
-    <!-- DEAN: ADD BUTTON -->
+    <!-- GENED DEAN: FILTER BY DEPARTMENT -->
+    <v-select
+      v-if="role === 'DEAN' && isGenEdDean"
+      v-model="selectedDepartment"
+      :items="departments"
+      item-title="name"
+      item-value="id"
+      label="Filter by Department"
+      variant="outlined"
+      density="comfortable"
+      class="mb-4"
+      clearable
+    />
+
+    <!-- NORMAL DEAN ONLY (GenEd dean cannot create) -->
     <v-btn
-      v-if="role === 'DEAN'"
+      v-if="role === 'DEAN' && !isGenEdDean"
       color="primary"
       prepend-icon="mdi-plus"
       class="mb-4"
@@ -56,8 +70,9 @@
       </template>
 
       <template #item.actions="{ item }">
+        <!-- Only normal dean can edit/delete -->
         <v-btn
-          v-if="role === 'DEAN'"
+          v-if="role === 'DEAN' && !isGenEdDean"
           icon
           variant="text"
           color="indigo"
@@ -67,7 +82,7 @@
         </v-btn>
 
         <v-btn
-          v-if="role === 'DEAN'"
+          v-if="role === 'DEAN' && !isGenEdDean"
           icon
           variant="text"
           color="red"
@@ -100,7 +115,7 @@ defineEmits<{
 const search = ref("")
 const selectedDepartment = ref<string | null>(null)
 
-// Use any[] so Vuetify TS doesn't scream
+// Table Headers
 const headers: any[] = [
   { title: "Course Code", key: "course_code" },
   { title: "Description", key: "description" },
@@ -112,22 +127,32 @@ const headers: any[] = [
   { title: "Actions", key: "actions", align: "center", sortable: false },
 ]
 
+// Department label helper
 function departmentName(id: string) {
-  return props.departments.find(d => d.id === id)?.name || "—"
+  return props.departments.find((d) => d.id === id)?.name || "—"
 }
 
+// Filtering logic with GENED dean rule
 const filteredSubjects = computed<Subject[]>(() => {
   let list = [...props.subjects]
 
+  // ADMIN filter
   if (props.role === "ADMIN" && selectedDepartment.value) {
-    list = list.filter(s => s.department_id === selectedDepartment.value)
+    list = list.filter((s) => s.department_id === selectedDepartment.value)
   }
 
+  // GEN ED Dean filter
+  if (props.role === "DEAN" && props.isGenEdDean && selectedDepartment.value) {
+    list = list.filter((s) => s.department_id === selectedDepartment.value)
+  }
+
+  // Search filter
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
-    list = list.filter((s: Subject) =>
-      s.course_code.toLowerCase().includes(q) ||
-      s.description.toLowerCase().includes(q)
+    list = list.filter(
+      (s: Subject) =>
+        s.course_code.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q)
     )
   }
 

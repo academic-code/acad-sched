@@ -66,7 +66,7 @@
 <script setup>
 definePageMeta({ layout: "dean" })
 
-import { ref, onMounted } from "vue"
+import { ref, onMounted, onBeforeUnmount } from "vue"
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
 
@@ -75,6 +75,9 @@ const { showAlert } = useAlert()
 
 const deanName = ref("Loading...")
 const departmentName = ref("")
+const departmentId = ref("")
+const isGenEdDean = ref(false)
+
 const loading = ref(true)
 
 const stats = ref([
@@ -83,47 +86,127 @@ const stats = ref([
   { label: "Subjects", icon: "mdi-book-open-page-variant", color: "deep-purple", value: 0 }
 ])
 
-const actions = [
+/* -------------------------------------------------------------------
+   QUICK ACTIONS (FULL LIST, THEN FILTER FOR GENED DEAN)
+------------------------------------------------------------------- */
+const actions = ref([
   { label: "Manage Faculty", icon: "mdi-account-group", color: "green", desc: "Add or assign teachers", to: "/dean/faculty" },
   { label: "Manage Classes", icon: "mdi-google-classroom", color: "orange", desc: "Create or modify classes", to: "/dean/classes" },
   { label: "Create Schedule", icon: "mdi-calendar-clock", color: "indigo", desc: "Build class timetable", to: "/dean/schedule" }
-]
+])
 
-async function loadData() {
+const subscriptions = []
+
+/* -------------------------------------------------------------------
+   LOAD DEAN INFO
+------------------------------------------------------------------- */
+async function loadDeanInfo() {
   const { data } = await supabase.auth.getUser()
   if (!data.user) return navigateTo("/login")
 
-  const { data: record } = await supabase
+  const { data: userRow } = await supabase
     .from("users")
     .select("full_name, department_id")
     .eq("auth_user_id", data.user.id)
     .single()
 
-  deanName.value = record.full_name
+  deanName.value = userRow.full_name
+  departmentId.value = userRow.department_id
 
   const { data: dept } = await supabase
     .from("departments")
-    .select("name")
-    .eq("id", record.department_id)
+    .select("name, type")
+    .eq("id", userRow.department_id)
     .single()
 
   departmentName.value = dept.name
+  isGenEdDean.value = dept.type === "GENED"
 
-  // Count data
-  const [{ count: faculty }, { count: classes }, { count: subjects }] = await Promise.all([
-    supabase.from("faculty").select("*", { count: "exact", head: true }).eq("department_id", record.department_id),
-    supabase.from("classes").select("*", { count: "exact", head: true }).eq("department_id", record.department_id),
-    supabase.from("subjects").select("*", { count: "exact", head: true }).eq("department_id", record.department_id)
-  ])
+  filterActionsForGenEd()
+}
 
-  stats.value[0].value = faculty
-  stats.value[1].value = classes
-  stats.value[2].value = subjects
+/* -------------------------------------------------------------------
+   FILTER QUICK ACTION BUTTONS FOR GENED DEAN
+------------------------------------------------------------------- */
+function filterActionsForGenEd() {
+  if (isGenEdDean.value) {
+    actions.value = actions.value.filter(a =>
+      a.label !== "Manage Classes" &&
+      a.label !== "Create Schedule"
+    )
+  }
+}
+
+/* -------------------------------------------------------------------
+   LOAD DASHBOARD COUNTS
+------------------------------------------------------------------- */
+async function loadCounts() {
+  let facultyCount = 0
+  let classCount = 0
+  let subjectCount = 0
+
+  if (isGenEdDean.value) {
+    // GenEd Dean sees only GenEd Subjects Count
+    const { count: genedSubjects } = await supabase
+      .from("subjects")
+      .select("*", { count: "exact", head: true })
+      .eq("is_gened", true)
+
+    subjectCount = genedSubjects
+  } else {
+    // Normal Dean → count everything related to their department
+    const [facultyRes, classesRes, subjectsRes] = await Promise.all([
+      supabase.from("faculty").select("*", { count: "exact", head: true }).eq("department_id", departmentId.value),
+      supabase.from("classes").select("*", { count: "exact", head: true }).eq("department_id", departmentId.value),
+      supabase.from("subjects").select("*", { count: "exact", head: true }).eq("department_id", departmentId.value)
+    ])
+
+    facultyCount = facultyRes.count
+    classCount = classesRes.count
+    subjectCount = subjectsRes.count
+  }
+
+  stats.value[0].value = facultyCount
+  stats.value[1].value = classCount
+  stats.value[2].value = subjectCount
 
   loading.value = false
 }
 
-onMounted(loadData)
+/* -------------------------------------------------------------------
+   REALTIME UPDATES
+------------------------------------------------------------------- */
+function enableRealtime() {
+  subscriptions.forEach(sub => supabase.removeChannel(sub))
+
+  const tables = ["subjects"]
+
+  if (!isGenEdDean.value) {
+    tables.push("faculty", "classes")
+  }
+
+  tables.forEach(table => {
+    const channel = supabase
+      .channel(`realtime-${table}`)
+      .on("postgres_changes", { event: "*", schema: "public", table }, () => loadCounts())
+      .subscribe()
+
+    subscriptions.push(channel)
+  })
+}
+
+/* -------------------------------------------------------------------
+   LIFECYCLE
+------------------------------------------------------------------- */
+onMounted(async () => {
+  await loadDeanInfo()
+  await loadCounts()
+  enableRealtime()
+})
+
+onBeforeUnmount(() => {
+  subscriptions.forEach(sub => supabase.removeChannel(sub))
+})
 </script>
 
 <style scoped>

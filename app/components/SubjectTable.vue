@@ -48,8 +48,8 @@
       <template #item.is_gened="{ item }">
         <v-chip
           size="small"
-          :color="item.is_gened ? 'purple-lighten-4' : 'grey-lighten-3'"
-          :text-color="item.is_gened ? 'purple-darken-2' : 'grey-darken-1'"
+          :color="item.is_gened ? 'purple-lighten-4' : 'blue-lighten-3'"
+          :text-color="item.is_gened ? 'purple-darken-2' : 'blue-darken-1'"
         >
           {{ item.is_gened ? "GENED" : "MAJOR" }}
         </v-chip>

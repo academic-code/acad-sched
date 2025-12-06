@@ -21,6 +21,7 @@
   </div>
 </template>
 
+
 <script setup lang="ts">
 import { ref, onMounted } from "vue"
 import SubjectTable from "~/components/SubjectTable.vue"
@@ -40,10 +41,14 @@ const selected = ref<Subject | null>(null)
 const deanDepartmentId = ref<string>("")
 const isGenEdDean = ref(false)
 
-async function loadCurrentDeanDepartment() {
+/** Helper so TypeScript stops complaining */
+function isError(res: any): res is { error: string } {
+  return typeof res === "object" && res !== null && "error" in res
+}
+
+async function loadDean() {
   const { data } = await $supabase.auth.getUser()
   const user = data?.user
-
   if (!user) return
 
   const { data: userRow } = await $supabase
@@ -58,30 +63,19 @@ async function loadCurrentDeanDepartment() {
 
   const { data: dept } = await $supabase
     .from("departments")
-    .select("id, name, type")
+    .select("type")
     .eq("id", userRow.department_id)
     .maybeSingle()
 
-  if (dept?.type === "GENED") {
-    isGenEdDean.value = true
-  }
-}
-
-async function loadDepartments() {
-  const { data } = await $supabase
-    .from("departments")
-    .select("id, name, type")
-    .order("name")
-
-  departments.value = (data || []) as { id: string; name: string; type?: string }[]
+  isGenEdDean.value = dept?.type === "GENED"
 }
 
 async function loadSubjects() {
   if (!deanDepartmentId.value) return
 
-  const res = await $fetch<Subject[]>("/api/subjects/list", {
+  const res = await $fetch("/api/subjects/list", {
     query: {
-      role: "DEAN",
+      role: isGenEdDean.value ? "GENED" : "DEAN",
       department_id: deanDepartmentId.value
     }
   })
@@ -89,68 +83,63 @@ async function loadSubjects() {
   subjects.value = Array.isArray(res) ? res : []
 }
 
+async function loadDepartments() {
+  const { data } = await $supabase.from("departments").select("id,name,type")
+  departments.value = data || []
+}
+
 function openCreate() {
+  if (isGenEdDean.value) return showAlert("error", "GenEd dean cannot create subjects.")
   selected.value = null
   modal.value = true
 }
 
 function openEdit(subject: Subject) {
+  if (isGenEdDean.value) return showAlert("error", "GenEd dean cannot edit subjects.")
   selected.value = { ...subject }
   modal.value = true
 }
 
 async function saveSubject(payload: Subject) {
-  if (!deanDepartmentId.value) {
-    showAlert("error", "Dean department not detected.")
-    return
-  }
-
-  const subject: Subject = {
+  const body: Subject = {
     ...payload,
-    department_id: deanDepartmentId.value,
-    is_gened: isGenEdDean.value ? payload.is_gened : false
+    department_id: deanDepartmentId.value
   }
 
-  const endpoint = subject.id
-    ? "/api/subjects/update"
-    : "/api/subjects/create"
+  const endpoint = payload.id ? "/api/subjects/update" : "/api/subjects/create"
 
-  const res = await $fetch<{ error?: string; success?: boolean }>(endpoint, {
-    method: subject.id ? "PUT" : "POST",
-    body: subject
+  const res = await $fetch(endpoint, {
+    method: payload.id ? "PUT" : "POST",
+    body
   })
 
-  if (res.error) {
-    showAlert("error", res.error)
-    return
-  }
+  if (isError(res)) return showAlert("error", res.error)
 
-  showAlert("success", subject.id ? "Subject updated." : "Subject created.")
+  showAlert("success", payload.id ? "Subject updated successfully" : "Subject created successfully")
   modal.value = false
-  await loadSubjects()
+  loadSubjects()
 }
 
 async function deleteSubject(subject: Subject) {
-  const res = await $fetch<{ error?: string; success?: boolean }>(
-    "/api/subjects/delete",
-    {
-      method: "DELETE",
-      body: { id: subject.id }
-    }
-  )
+  if (isGenEdDean.value) return showAlert("error", "GenEd dean cannot delete subjects.")
 
-  if (res.error) {
-    showAlert("error", res.error)
-    return
-  }
+  const res = await $fetch("/api/subjects/delete", {
+    method: "DELETE",
+    body: { id: subject.id }
+  })
+
+  if (isError(res)) return showAlert("error", res.error)
 
   showAlert("success", "Subject deleted.")
-  await loadSubjects()
+  loadSubjects()
 }
 
 onMounted(async () => {
-  await loadCurrentDeanDepartment()
+  await loadDean()
   await loadDepartments()
   await loadSubjects()
 })
 </script>
+
+
+

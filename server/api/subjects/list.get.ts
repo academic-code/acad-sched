@@ -8,17 +8,18 @@ export default defineEventHandler(async (event) => {
   const role = query.role?.toString() || "ADMIN"
   const departmentId = query.department_id?.toString() || ""
 
-  let q = supabase.from("subjects").select("*")
+  let request = supabase.from("subjects").select("*")
 
   if (role === "DEAN" && departmentId) {
-    q = q.eq("department_id", departmentId)
+    request = request.or(`department_id.eq.${departmentId},is_gened.eq.true`)
   }
 
-  const { data, error } = await q.order("course_code")
-
-  if (error) {
-    return { error: error.message }
+  if (role === "GENED") {
+    request = request.eq("is_gened", true)
   }
 
+  const { data, error } = await request.order("created_at", { ascending: false })
+
+  if (error) return { error: error.message }
   return data
 })

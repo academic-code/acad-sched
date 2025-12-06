@@ -31,6 +31,7 @@
             density="comfortable"
           />
         </v-col>
+
         <v-col cols="4">
           <v-text-field
             v-model.number="form.lab"
@@ -40,6 +41,7 @@
             density="comfortable"
           />
         </v-col>
+
         <v-col cols="4">
           <v-text-field
             v-model.number="form.units"
@@ -47,6 +49,7 @@
             label="Units"
             variant="outlined"
             density="comfortable"
+            readonly
           />
         </v-col>
       </v-row>
@@ -61,6 +64,7 @@
             density="comfortable"
           />
         </v-col>
+
         <v-col cols="6">
           <v-select
             v-model="form.semester"
@@ -72,39 +76,43 @@
         </v-col>
       </v-row>
 
+      <!-- FIXED: Dropdowns for academic + curriculum -->
       <v-row>
         <v-col cols="6">
-          <v-text-field
+          <v-select
             v-model="form.academic_year"
-            label="Academic Year (e.g. 2024-2025)"
+            :items="academicYears"
+            label="Academic Year"
             variant="outlined"
             density="comfortable"
           />
         </v-col>
+
         <v-col cols="6">
-          <v-text-field
+          <v-select
             v-model="form.curriculum_year"
-            label="Curriculum Year (e.g. 2023)"
+            :items="curriculumYears"
+            label="Curriculum Year"
             variant="outlined"
             density="comfortable"
           />
         </v-col>
       </v-row>
 
+      <!-- FIXED: Toggle now reacts to GenEd Dean role -->
       <v-switch
         v-model="form.is_gened"
-        :disabled="!canSetGenEd"
+        :disabled="canSetGenEd" 
         color="purple-darken-2"
         inset
         class="mt-2"
-        :label="`General Education Subject${canSetGenEd ? '' : ' (locked)'}`"
+        :label="`General Education Subject${canSetGenEd ? ' (locked by GenEd Dean)' : ''}`"
       />
+
 
       <div class="d-flex justify-end mt-4">
         <v-btn variant="text" @click="close">Cancel</v-btn>
-        <v-btn color="primary" class="ml-2" @click="handleSave">
-          Save
-        </v-btn>
+        <v-btn color="primary" class="ml-2" @click="handleSave">Save</v-btn>
       </div>
     </v-card>
   </v-dialog>
@@ -120,21 +128,29 @@ const props = defineProps<{
   canSetGenEd: boolean
 }>()
 
-const emit = defineEmits<{
-  (e: "update:modelValue", value: boolean): void
-  (e: "save", payload: Subject): void
-}>()
+const emit = defineEmits(["update:modelValue", "save"])
 
+/* ---------- Dialog Binding ---------- */
 const open = computed({
   get: () => props.modelValue,
-  set: (val: boolean) => emit("update:modelValue", val)
+  set: v => emit("update:modelValue", v)
 })
+
+/* ---------- Dropdown Arrays ---------- */
+const academicYears = Array.from({ length: 42 }, (_, i) => {
+  const start = 2008 + i
+  return `${start}-${start + 1}`
+})
+
+const curriculumYears = Array.from({ length: 43 }, (_, i) =>
+  (2008 + i).toString()
+)
 
 const yearLevelItems = [
   { title: "1st Year", value: 1 },
   { title: "2nd Year", value: 2 },
   { title: "3rd Year", value: 3 },
-  { title: "4th Year", value: 4 },
+  { title: "4th Year", value: 4 }
 ]
 
 const empty: Subject = {
@@ -155,29 +171,39 @@ const empty: Subject = {
 
 const form = ref<Subject>({ ...empty })
 
+/* ---------- Load Data When Editing ---------- */
 watch(
   () => props.data,
-  (val) => {
-    if (val) {
-      form.value = { ...val }
-    } else {
-      form.value = { ...empty }
-    }
+  val => {
+    form.value = val ? { ...val } : { ...empty }
   },
   { immediate: true }
 )
 
-function close() {
-  emit("update:modelValue", false)
-}
+/* ---------- Auto Compute Units ---------- */
+watch(
+  () => [form.value.lec, form.value.lab],
+  () => {
+    form.value.units =
+      Number(form.value.lec || 0) + Number(form.value.lab || 0)
+  }
+)
 
+/* ---------- Save Logic ---------- */
 function handleSave() {
-  const yl = form.value.year_level_number
-  if (yl === 1) form.value.year_level_label = "1st Year"
-  else if (yl === 2) form.value.year_level_label = "2nd Year"
-  else if (yl === 3) form.value.year_level_label = "3rd Year"
-  else if (yl === 4) form.value.year_level_label = "4th Year"
+  const yearMap: Record<number, string> = {
+    1: "1st Year",
+    2: "2nd Year",
+    3: "3rd Year",
+    4: "4th Year"
+  }
+
+  form.value.year_level_label = yearMap[form.value.year_level_number]
 
   emit("save", { ...form.value })
+}
+
+function close() {
+  emit("update:modelValue", false)
 }
 </script>

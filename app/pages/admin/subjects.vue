@@ -7,8 +7,6 @@
       :departments="departments"
       role="ADMIN"
       :can-create="false"
-      :can-edit="false"
-      :can-delete="false"
       :show-department-filter="true"
     />
   </div>

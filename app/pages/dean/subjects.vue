@@ -2,7 +2,7 @@
   <div>
     <h1 class="text-h5 font-weight-bold mb-6">Subjects</h1>
 
-    <!-- SUBJECT FORM (PROGRAM DEAN ONLY) -->
+    <!-- SUBJECT FORM DIALOG (PROGRAM DEAN ONLY) -->
     <SubjectForm
       v-if="!isGenEdDean"
       v-model="formModal"
@@ -11,13 +11,15 @@
       @save="handleSave"
     />
 
-    <!-- DELETE CONFIRMATION (PROGRAM DEAN ONLY) -->
+    <!-- HARD DELETE CONFIRMATION (PROGRAM DEAN ONLY) -->
     <v-dialog v-model="deleteDialog" width="480" v-if="!isGenEdDean">
       <v-card class="pa-4">
         <h3 class="text-h6 font-weight-medium mb-2">Delete Subject</h3>
         <p class="mb-2">
           Are you sure you want to delete
-          <strong>{{ pendingDelete?.course_code }} — {{ pendingDelete?.description }}</strong>?
+          <strong>
+            {{ pendingDelete?.course_code }} — {{ pendingDelete?.description }}
+          </strong>?
         </p>
 
         <div v-if="deletePreview" class="text-body-2 mb-3">
@@ -30,7 +32,9 @@
           </ul>
         </div>
 
-        <p class="text-body-2 text-red-darken-1">This action cannot be undone.</p>
+        <p class="text-body-2 text-red-darken-1">
+          This action cannot be undone.
+        </p>
 
         <div class="d-flex justify-end mt-4">
           <v-btn variant="text" @click="deleteDialog = false">Cancel</v-btn>
@@ -41,7 +45,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- SUBJECT LIST -->
+    <!-- SUBJECT DASHBOARD / LIST -->
     <SubjectTable
       :subjects="subjects"
       :departments="departments"
@@ -49,7 +53,7 @@
       :can-create="!isGenEdDean"
       :can-edit="isGenEdDean ? undefined : canEditRow"
       :can-delete="isGenEdDean ? undefined : canDeleteRow"
-      :show-department-filter="isGenEdDean && departments.length > 0"
+      :show-department-filter="isGenEdDean"
       @create="openCreate"
       @edit="openEdit"
       @delete="requestDelete"
@@ -79,12 +83,12 @@ const deanDepartmentId = ref<string>("")
 const deanUserId = ref<string | null>(null)
 const isGenEdDean = ref(false)
 
-/* ---------- FORM STATE ---------- */
+/* ---------- FORM STATE (PROGRAM DEAN) ---------- */
 const formModal = ref(false)
 const saving = ref(false)
 const selected = ref<Subject | null>(null)
 
-/* ---------- DELETE STATE ---------- */
+/* ---------- DELETE STATE (PROGRAM DEAN) ---------- */
 const deleteDialog = ref(false)
 const pendingDelete = ref<Subject | null>(null)
 const deleting = ref(false)
@@ -95,25 +99,35 @@ const deletePreview = ref<{
   prerequisites: number
 } | null>(null)
 
-/* ---------- PERMISSIONS FOR NORMAL DEAN ---------- */
-const canEditRow = (subject: Subject) =>
-  !isGenEdDean.value && subject.department_id === deanDepartmentId.value
+/* ---------- PERMISSIONS (PROGRAM DEAN ONLY) ---------- */
+const canCreate = computed(() => !isGenEdDean.value)
 
-const canDeleteRow = (subject: Subject) => canEditRow(subject)
+function canEditRow(subject: Subject): boolean {
+  // Program dean: only subjects in their own department
+  if (isGenEdDean.value) return false
+  return subject.department_id === deanDepartmentId.value
+}
 
-/* ---------- CONTEXT LOADING ---------- */
+function canDeleteRow(subject: Subject): boolean {
+  return canEditRow(subject)
+}
+
+/* ---------- LOAD CONTEXT ---------- */
 async function loadDeanContext() {
   const { data } = await $supabase.auth.getUser()
   const authUser = data?.user
   if (!authUser) return
 
-  const { data: userRow } = await $supabase
+  const { data: userRow, error: userErr } = await $supabase
     .from("users")
     .select("id, department_id")
     .eq("auth_user_id", authUser.id)
     .maybeSingle()
 
-  if (!userRow?.department_id) return
+  if (userErr || !userRow?.department_id) {
+    showAlert("error", "Unable to load dean profile.")
+    return
+  }
 
   deanDepartmentId.value = userRow.department_id
   deanUserId.value = userRow.id
@@ -127,30 +141,30 @@ async function loadDeanContext() {
   isGenEdDean.value = deptRow?.type === "GENED"
 }
 
-/* ---------- LOAD DEPARTMENTS ---------- */
 async function loadDepartments() {
   const { data } = await $supabase
     .from("departments")
     .select("id, name, type")
     .order("name")
 
-  departments.value = data || []
+  departments.value = (data || []) as { id: string; name: string; type?: string }[]
 }
 
-/* ---------- LOAD SUBJECTS BASED ON ROLE ---------- */
+/* ---------- LOAD SUBJECTS (BASED ON ROLE) ---------- */
 async function loadSubjects() {
   if (!deanDepartmentId.value) return
 
   if (isGenEdDean.value) {
-    // GenEd: view only gened subjects
+    // GenEd dean: only GenEd subjects; read-only
     const res = await $fetch("/api/subjects/list", {
       query: { role: "GENED" }
     })
-    subjects.value = Array.isArray(res) ? res : []
+    subjects.value = Array.isArray(res) ? (res as Subject[]) : []
     return
   }
 
-  // Normal Dean: department subjects + visibility of gened
+  // PROGRAM DEAN:
+  // 1) All subjects in their department
   const deptSubjects = await $fetch("/api/subjects/list", {
     query: {
       role: "DEAN",
@@ -158,86 +172,146 @@ async function loadSubjects() {
     }
   })
 
+  // 2) All GenEd subjects (for visibility)
   const genedSubjects = await $fetch("/api/subjects/list", {
-    query: { role: "GENED" }
+    query: {
+      role: "GENED"
+    }
   })
 
-  const combined = [...(deptSubjects || []), ...(genedSubjects || [])] as Subject[]
+  const combined = [
+    ...(Array.isArray(deptSubjects) ? (deptSubjects as Subject[]) : []),
+    ...(Array.isArray(genedSubjects) ? (genedSubjects as Subject[]) : [])
+  ]
 
-  const map = new Map<string, Subject>()
-  combined.forEach((s) => s.id && map.set(s.id, s))
+  const dedupMap = new Map<string, Subject>()
+  for (const s of combined) {
+    if (!s.id) continue
+    dedupMap.set(s.id, s)
+  }
 
-  subjects.value = [...map.values()]
+  subjects.value = Array.from(dedupMap.values())
 }
 
-/* ---------- CRUD ---------- */
+/* ---------- FORM HANDLERS (PROGRAM DEAN) ---------- */
 function openCreate() {
-  if (!isGenEdDean.value) {
-    selected.value = null
-    formModal.value = true
-  }
+  if (isGenEdDean.value) return
+  selected.value = null
+  formModal.value = true
 }
 
 function openEdit(subject: Subject) {
-  if (!canEditRow(subject)) return showAlert("error", "Not allowed.")
+  if (!canEditRow(subject)) {
+    showAlert("error", "You can only edit subjects in your own department.")
+    return
+  }
   selected.value = { ...subject }
   formModal.value = true
 }
 
-async function handleSave(payload: any) {
-  saving.value = true
-
-  const body = {
-    ...payload,
-    department_id: deanDepartmentId.value,
-    created_by: deanUserId.value
-  }
-
-  const endpoint = payload.id ? "/api/subjects/update" : "/api/subjects/create"
-  const method = payload.id ? "PUT" : "POST"
-
-  const res: any = await $fetch(endpoint, { method, body })
-
-  if (res?.error) showAlert("error", res.error)
-  else showAlert("success", payload.id ? "Subject updated." : "Subject created.")
-
-  formModal.value = false
-  selected.value = null
-  saving.value = false
-  loadSubjects()
+type FormSavePayload = {
+  id?: string
+  year_level_number: number
+  year_level_label: string
+  semester: string
+  course_code: string
+  description: string
+  lec: number
+  lab: number
+  units: number
+  is_gened: boolean
 }
 
+async function handleSave(payloads: FormSavePayload[]) {
+  if (!deanDepartmentId.value || !deanUserId.value) {
+    showAlert("error", "Dean context not loaded.")
+    return
+  }
+
+  saving.value = true
+
+  try {
+    for (const payload of payloads) {
+      const body: any = {
+        ...payload,
+        department_id: deanDepartmentId.value,
+        created_by: deanUserId.value
+      }
+
+      if (payload.id) {
+        // UPDATE
+        const res: any = await $fetch("/api/subjects/update", {
+          method: "PUT",
+          body
+        })
+        if (res?.error) throw new Error(res.error)
+      } else {
+        // CREATE
+        const res: any = await $fetch("/api/subjects/create", {
+          method: "POST",
+          body
+        })
+        if (res?.error) throw new Error(res.error)
+      }
+    }
+
+    showAlert("success", "Subject(s) saved.")
+    formModal.value = false
+    selected.value = null
+    await loadSubjects()
+  } catch (err: any) {
+    showAlert("error", err?.message || "Failed to save subject(s).")
+  } finally {
+    saving.value = false
+  }
+}
+
+/* ---------- DELETE FLOW (PROGRAM DEAN) ---------- */
 async function requestDelete(subject: Subject) {
-  if (!canDeleteRow(subject)) return showAlert("error", "Not allowed.")
+  if (!canDeleteRow(subject)) {
+    showAlert("error", "You can only delete subjects in your own department.")
+    return
+  }
 
   pendingDelete.value = subject
+  deletePreview.value = null
   deleteDialog.value = true
 
-  const res: any = await $fetch("/api/subjects/delete-preview", {
-    method: "POST",
-    body: { id: subject.id }
-  })
+  try {
+    const res: any = await $fetch("/api/subjects/delete-preview", {
+      method: "POST",
+      body: { id: subject.id }
+    })
 
-  deletePreview.value = res?.counts || null
+    if (res?.error) throw new Error(res.error)
+
+    deletePreview.value = res.counts || null
+  } catch (err: any) {
+    showAlert("error", err?.message || "Failed to load delete impact.")
+  }
 }
 
 async function executeDelete() {
   if (!pendingDelete.value) return
-
   deleting.value = true
 
-  const res: any = await $fetch("/api/subjects/delete", {
-    method: "DELETE",
-    body: { id: pendingDelete.value.id }
-  })
+  try {
+    const res: any = await $fetch("/api/subjects/delete", {
+      method: "DELETE",
+      body: { id: pendingDelete.value.id }
+    })
 
-  deleting.value = false
-  deleteDialog.value = false
+    if (res?.error) throw new Error(res.error)
 
-  if (res?.error) return showAlert("error", res.error)
-
-  showAlert("success", "Subject deleted.")
-  loadSubjects()
+    showAlert("success", "Subject deleted.")
+    deleteDialog.value = false
+    pendingDelete.value = null
+    await loadSubjects()
+  } catch (err: any) {
+    showAlert("error", err?.message || "Failed to delete subject.")
+  } finally {
+    deleting.value = false
+  }
 }
 
 /* ---------- INIT ---------- */

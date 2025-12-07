@@ -8,12 +8,28 @@ export default defineEventHandler(async (event) => {
 
   if (!body.id) return { error: "Missing subject ID." }
 
+  // ---- STRICT DUPLICATE VALIDATION ON UPDATE ----
+  const { data: exists } = await supabase
+    .from("subjects")
+    .select("id")
+    .or(
+      `course_code.eq.${body.course_code.trim()},description.eq.${body.description.trim()}`
+    )
+    .neq("id", body.id) // allow the existing record
+    .limit(1)
+
+  if (exists && exists.length > 0) {
+    return {
+      error: "Another subject already exists with this course code or description."
+    }
+  }
+
+  // ---- Update ----
   const { error } = await supabase
     .from("subjects")
     .update({
-      department_id: body.department_id,
-      course_code: body.course_code,
-      description: body.description,
+      course_code: body.course_code.trim(),
+      description: body.description.trim(),
       lec: body.lec ?? 0,
       lab: body.lab ?? 0,
       units: body.units ?? 0,

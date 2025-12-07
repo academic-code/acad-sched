@@ -300,24 +300,80 @@ function confirmDelete(item) {
 }
 
 async function deleteDepartment() {
+  if (!selected.value) return
+
   loading.value = true
 
-  const { error } = await $supabase
-    .from("departments")
-    .delete()
-    .eq("id", selected.value.id)
+  try {
+    const deptId = selected.value.id
+
+    // -----------------------------
+    // Fetch linked users BEFORE deleting DB records
+    // -----------------------------
+    const { data: linkedUsers } = await $supabase
+      .from("users")
+      .select("id, auth_user_id")
+      .eq("department_id", deptId)
+
+    const authIds = linkedUsers
+      ?.map(u => u.auth_user_id)
+      .filter(Boolean) || []
+
+    // -----------------------------
+    // 1) Delete schedules
+    // -----------------------------
+    await $supabase.from("schedules").delete().eq("department_id", deptId)
+
+    // -----------------------------
+    // 2) Delete classes
+    // -----------------------------
+    await $supabase.from("classes").delete().eq("department_id", deptId)
+
+    // -----------------------------
+    // 3) Delete subjects
+    // -----------------------------
+    await $supabase.from("subjects").delete().eq("department_id", deptId)
+
+    // -----------------------------
+    // 4) Delete faculty
+    // -----------------------------
+    await $supabase.from("faculty").delete().eq("department_id", deptId)
+
+    // -----------------------------
+    // 5) Delete user DB records
+    // -----------------------------
+    await $supabase.from("users").delete().eq("department_id", deptId)
+
+    // -----------------------------
+    // 6) Delete AUTH accounts (if any)
+    // -----------------------------
+    if (authIds.length > 0) {
+      for (const id of authIds) {
+        await $supabase.auth.admin.deleteUser(id)
+      }
+    }
+
+    // -----------------------------
+    // 7) Delete department itself
+    // -----------------------------
+    const { error } = await $supabase
+      .from("departments")
+      .delete()
+      .eq("id", deptId)
+
+    if (error) throw error
+
+    showAlert("success", "Department and all linked data (including login accounts) deleted.")
+
+  } catch (err) {
+    showAlert("error", err.message || "Failed to delete department.")
+  }
 
   loading.value = false
   deleteDialog.value = false
-
-  if (error) {
-    showAlert("error", error.message)
-    return
-  }
-
-  showAlert("success", "Department deleted successfully!")
   loadDepartments()
 }
+
 </script>
 
 <style scoped>

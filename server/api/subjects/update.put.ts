@@ -20,9 +20,7 @@ export default defineEventHandler(async (event) => {
       year_level_number: body.year_level_number,
       year_level_label: body.year_level_label,
       semester: body.semester,
-      academic_year: body.academic_year,
-      curriculum_year: body.curriculum_year,
-      is_gened: body.is_gened ?? false,
+      is_gened: body.is_gened ?? false
     })
     .eq("id", body.id)
 

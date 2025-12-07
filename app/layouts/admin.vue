@@ -16,7 +16,7 @@
       <!-- SIDEBAR MENU -->
       <v-list nav density="comfortable">
         <v-list-item
-          v-for="item in menu"
+          v-for="item in finalMenu"
           :key="item.to"
           :to="item.to"
           :prepend-icon="item.icon"
@@ -75,7 +75,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue"
+import { ref, computed, onMounted } from "vue"
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
 
@@ -90,10 +90,16 @@ const isMobile = ref(false)
 const userEmail = ref("Loading...")
 const userRole = ref("")
 
-const menu = [
+/* -----------------------
+ BASE MENU STRUCTURE
+------------------------ */
+const baseMenu = [
   { label: "Dashboard", to: "/admin", icon: "mdi-view-dashboard" },
   { label: "Departments", to: "/admin/departments", icon: "mdi-domain" },
   { label: "Periods", to: "/admin/periods", icon: "mdi-clock-outline" },
+
+  // Academic Terms will be inserted HERE dynamically
+
   { label: "Subjects", to: "/admin/subjects", icon: "mdi-book-open-page-variant" },
   { label: "Teachers", to: "/admin/faculty", icon: "mdi-account-group-outline" },
   { label: "Classes", to: "/admin/classes", icon: "mdi-google-classroom" },
@@ -101,6 +107,27 @@ const menu = [
   { label: "Schedules", to: "/admin/schedules", icon: "mdi-calendar-clock" }
 ]
 
+/* -----------------------
+ DYNAMIC MENU OUTPUT
+------------------------ */
+const finalMenu = computed(() => {
+  const menu = [...baseMenu]
+
+  if (userRole.value === "ADMIN") {
+    // Insert Academic Terms AFTER "Periods"
+    menu.splice(3, 0, {
+      label: "Academic Terms",
+      to: "/admin/academic-terms",
+      icon: "mdi-flag-checkered"
+    })
+  }
+
+  return menu
+})
+
+/* -----------------------
+ USER + ROLE LOADER
+------------------------ */
 async function loadUserData() {
   const { data } = await supabase.auth.getUser()
   const user = data.user
@@ -109,7 +136,6 @@ async function loadUserData() {
 
   userEmail.value = user.email || "Unknown"
 
-  // load role from users table
   const { data: dbUser } = await supabase
     .from("users")
     .select("role")
@@ -119,6 +145,9 @@ async function loadUserData() {
   userRole.value = dbUser?.role || "UNKNOWN"
 }
 
+/* -----------------------
+ LOGOUT
+------------------------ */
 async function logout() {
   const { error } = await supabase.auth.signOut()
 
@@ -131,6 +160,9 @@ async function logout() {
   navigateTo("/login")
 }
 
+/* -----------------------
+ RESPONSIVE HANDLER
+------------------------ */
 onMounted(() => {
   loadUserData()
 

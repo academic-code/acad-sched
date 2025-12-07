@@ -6,6 +6,10 @@
       :subjects="subjects"
       :departments="departments"
       role="ADMIN"
+      :can-create="false"
+      :can-edit="false"
+      :can-delete="false"
+      :show-department-filter="true"
     />
   </div>
 </template>
@@ -23,14 +27,13 @@ const subjects = ref<Subject[]>([])
 const departments = ref<{ id: string; name: string }[]>([])
 
 async function loadSubjects() {
-  const { data, error } = await $supabase
-    .from("subjects")
-    .select("*")
-    .order("course_code")
+  const res = await $fetch("/api/subjects/list", {
+    query: {
+      role: "ADMIN"
+    }
+  })
 
-  if (!error && data) {
-    subjects.value = data as Subject[]
-  }
+  subjects.value = Array.isArray(res) ? (res as Subject[]) : []
 }
 
 async function loadDepartments() {
@@ -42,8 +45,8 @@ async function loadDepartments() {
   departments.value = (data || []) as { id: string; name: string }[]
 }
 
-onMounted(() => {
-  loadDepartments()
-  loadSubjects()
+onMounted(async () => {
+  await loadDepartments()
+  await loadSubjects()
 })
 </script>

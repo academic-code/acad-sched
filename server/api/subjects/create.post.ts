@@ -10,16 +10,16 @@ export default defineEventHandler(async (event) => {
     return { error: "Missing required fields." }
   }
 
-  if (!body.academic_year) {
-    return { error: "Academic year is required (e.g. 2024-2025)." }
-  }
-
-  if (!body.curriculum_year) {
-    return { error: "Curriculum year is required (e.g. 2023)." }
-  }
-
   if (!body.year_level_number) {
     return { error: "Year level is required." }
+  }
+
+  if (!body.semester) {
+    return { error: "Semester is required." }
+  }
+
+  if (!body.units && body.units !== 0) {
+    return { error: "Units is required." }
   }
 
   const { error } = await supabase.from("subjects").insert({
@@ -32,9 +32,8 @@ export default defineEventHandler(async (event) => {
     year_level_number: body.year_level_number,
     year_level_label: body.year_level_label,
     semester: body.semester,
-    academic_year: body.academic_year,
-    curriculum_year: body.curriculum_year,
     is_gened: body.is_gened ?? false,
+    created_by: body.created_by ?? null
   })
 
   if (error) return { error: error.message }

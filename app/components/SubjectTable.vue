@@ -27,6 +27,7 @@
         />
       </div>
 
+      <!-- Add button: only when parent passes canCreate=true (Program Dean only) -->
       <v-btn
         v-if="canCreate"
         color="primary"
@@ -206,7 +207,7 @@ function yearLabelFromNumber(n: number): string {
 const filtered = computed(() => {
   let list = [...props.subjects]
 
-  // Department filter (Admin + GenEd dean)
+  // Department filter (Admin + GenEd dean; controlled by parent)
   if (props.showDepartmentFilter && selectedDeptId.value) {
     list = list.filter((s) => s.department_id === selectedDeptId.value)
   }
@@ -225,7 +226,11 @@ const filtered = computed(() => {
 })
 
 const groupedYears = computed(() => {
-  const byYear = new Map<number, { year_level_number: number; year_label: string; semesters: { code: string; label: string; subjects: Subject[] }[] }>()
+  const byYear = new Map<number, {
+    year_level_number: number
+    year_label: string
+    semesters: { code: string; label: string; subjects: Subject[] }[]
+  }>()
 
   for (const s of filtered.value) {
     const yearNum = s.year_level_number || 0
@@ -270,7 +275,9 @@ const groupedYears = computed(() => {
 
   // Within each year, sort semesters in defined order
   for (const y of result) {
-    y.semesters.sort((a, b) => (semesterOrder[a.code] || 99) - (semesterOrder[b.code] || 99))
+    y.semesters.sort(
+      (a, b) => (semesterOrder[a.code] || 99) - (semesterOrder[b.code] || 99)
+    )
   }
 
   return result

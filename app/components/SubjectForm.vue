@@ -1,13 +1,13 @@
 <template>
-  <v-dialog v-model="model" width="900">
+  <v-dialog v-model="model" width="1000">
     <v-card class="pa-4">
       <h3 class="text-h6 font-weight-medium mb-4">
         {{ local.id ? "Edit Subject" : "Create Subject" }}
       </h3>
 
-      <!-- TOP ROW: YEAR LEVEL + SEMESTER -->
-      <v-row class="mb-3">
-        <v-col cols="6" md="4">
+      <!-- TOP ROW -->
+      <v-row class="mb-4">
+        <v-col cols="12" md="4">
           <v-select
             v-model="local.year_level_number"
             :items="yearLevelItems"
@@ -19,7 +19,7 @@
           />
         </v-col>
 
-        <v-col cols="6" md="4">
+        <v-col cols="12" md="4">
           <v-select
             v-model="local.semester"
             :items="semesterItems"
@@ -32,9 +32,9 @@
         </v-col>
       </v-row>
 
-      <!-- SUBJECT FORM -->
-      <v-row align="center" class="mb-2">
-        <v-col cols="12" md="3">
+      <!-- INLINE FORM ROW -->
+      <v-row class="mb-2" align="center">
+        <v-col cols="12" md="2">
           <v-text-field
             v-model="local.course_code"
             label="Course Code"
@@ -43,7 +43,7 @@
           />
         </v-col>
 
-        <v-col cols="12" md="4">
+        <v-col cols="12" md="3">
           <v-text-field
             v-model="local.description"
             label="Description"
@@ -52,7 +52,7 @@
           />
         </v-col>
 
-        <v-col cols="4" md="2">
+        <v-col cols="4" md="1">
           <v-text-field
             v-model.number="local.lec"
             type="number"
@@ -63,7 +63,7 @@
           />
         </v-col>
 
-        <v-col cols="4" md="2">
+        <v-col cols="4" md="1">
           <v-text-field
             v-model.number="local.lab"
             type="number"
@@ -77,16 +77,14 @@
         <v-col cols="4" md="2">
           <v-text-field
             :model-value="local.units"
-            type="number"
-            label="Units (Auto)"
+            label="Units"
+            readonly
             variant="outlined"
             density="comfortable"
-            readonly
-            disabled
           />
         </v-col>
 
-        <v-col cols="12" md="12" class="d-flex align-center justify-end mt-2">
+        <v-col cols="12" md="3" class="d-flex align-center">
           <v-switch
             v-model="local.is_gened"
             inset
@@ -94,14 +92,14 @@
             hide-details
           >
             <template #label>
-              <span class="text-body-2">General Education Subject</span>
+              <span class="text-body-2">Gen Ed Subject</span>
             </template>
           </v-switch>
         </v-col>
       </v-row>
 
-      <!-- ACTIONS -->
-      <div class="d-flex justify-end mt-4">
+      <!-- FOOTER ACTIONS -->
+      <div class="d-flex justify-end mt-6">
         <v-btn variant="text" @click="close">Cancel</v-btn>
         <v-btn
           color="primary"
@@ -110,7 +108,7 @@
           :disabled="!isValid"
           @click="emitSave"
         >
-          {{ local.id ? "Update Subject" : "Add Subject" }}
+          Save
         </v-btn>
       </div>
     </v-card>
@@ -174,29 +172,23 @@ const local = ref({
   is_gened: false
 })
 
+function yearLabelFromNumber(n: number): string {
+  return `${n}${n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"} Year`
+}
+
+/* ---------- LOAD DATA WHEN EDITING ---------- */
 watch(
   () => props.data,
   (val) => {
     if (!val) {
-      local.value = {
-        id: undefined,
-        year_level_number: 1,
-        year_level_label: "1st Year",
-        semester: "1ST",
-        course_code: "",
-        description: "",
-        lec: 0,
-        lab: 0,
-        units: 0,
-        is_gened: false
-      }
+      resetForm()
       return
     }
 
     local.value = {
       id: val.id,
       year_level_number: val.year_level_number,
-      year_level_label: val.year_level_label || yearLabelFromNumber(val.year_level_number),
+      year_level_label: yearLabelFromNumber(val.year_level_number),
       semester: val.semester,
       course_code: val.course_code,
       description: val.description,
@@ -209,27 +201,40 @@ watch(
   { immediate: true }
 )
 
+/* ---------- AUTO UNIT CALC ---------- */
 watch(
   () => [local.value.lec, local.value.lab],
   () => {
     local.value.units = Number(local.value.lec || 0) + Number(local.value.lab || 0)
-  }
+  },
+  { immediate: true }
 )
 
-function yearLabelFromNumber(n: number): string {
-  return ["1st Year", "2nd Year", "3rd Year", "4th Year"][n - 1] ?? `${n}th Year`
-}
-
-const isValid = computed(() => {
-  return !!local.value.course_code.trim() && !!local.value.description.trim()
-})
+/* ---------- VALIDATION ---------- */
+const isValid = computed(() =>
+  !!local.value.course_code.trim() &&
+  !!local.value.description.trim()
+)
 
 const saving = computed(() => props.saving ?? false)
 
-function close() {
-  model.value = false
+/* ---------- RESET FORM ---------- */
+function resetForm() {
+  local.value = {
+    id: undefined,
+    year_level_number: 1,
+    year_level_label: "1st Year",
+    semester: "1ST",
+    course_code: "",
+    description: "",
+    lec: 0,
+    lab: 0,
+    units: 0,
+    is_gened: false
+  }
 }
 
+/* ---------- SAVE ACTION ---------- */
 function emitSave() {
   if (!isValid.value) return
 
@@ -240,10 +245,17 @@ function emitSave() {
     semester: local.value.semester,
     course_code: local.value.course_code.trim(),
     description: local.value.description.trim(),
-    lec: Number(local.value.lec || 0),
-    lab: Number(local.value.lab || 0),
-    units: Number(local.value.units || 0),
+    lec: Number(local.value.lec),
+    lab: Number(local.value.lab),
+    units: Number(local.value.units),
     is_gened: !!local.value.is_gened
   })
+
+  // reset after save
+  resetForm()
+}
+
+function close() {
+  model.value = false
 }
 </script>

@@ -33,12 +33,6 @@ export default defineEventHandler(async (event) => {
   if (classErr) return { error: classErr.message }
 
   // Prerequisites (even if you don't use them anymore)
-  const { count: prereqCount, error: prereqErr } = await supabase
-    .from("subject_prerequisites")
-    .select("id", { count: "exact", head: true })
-    .or(`subject_id.eq.${subjectId},prerequisite_subject_id.eq.${subjectId}`)
-
-  if (prereqErr) return { error: prereqErr.message }
 
   return {
     success: true,
@@ -46,7 +40,6 @@ export default defineEventHandler(async (event) => {
       schedules: schedulesCount ?? 0,
       faculty_assignments: facultyCount ?? 0,
       class_links: classCount ?? 0,
-      prerequisites: prereqCount ?? 0
     }
   }
 })

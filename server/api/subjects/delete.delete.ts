@@ -58,13 +58,6 @@ export default defineEventHandler(async (event) => {
 
   if (classSubErr) return { error: classSubErr.message }
 
-  // 6) Delete prerequisites involving this subject (both ways)
-  const { error: prereqErr } = await supabase
-    .from("subject_prerequisites")
-    .delete()
-    .or(`subject_id.eq.${id},prerequisite_subject_id.eq.${id}`)
-
-  if (prereqErr) return { error: prereqErr.message }
 
   // 7) Finally delete the subject itself
   const { error: subErr } = await supabase

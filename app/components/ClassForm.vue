@@ -16,6 +16,7 @@
         variant="outlined"
         density="comfortable"
         class="mb-3"
+        :disabled="!editing"
       />
 
       <!-- Class Name (Manual Input) -->
@@ -114,7 +115,6 @@ const props = defineProps<{
   saving?: boolean
 }>()
 
-
 const emit = defineEmits<{
   (e: "update:modelValue", v: boolean): void
   (e: "save", payload: ClassFormPayload): void
@@ -146,6 +146,12 @@ const termOptions = computed(() =>
 
 const facultyOptions = computed(() => props.faculty)
 
+/* ----------------------- ACTIVE TERM HELPER ----------------------- */
+
+const activeTerm = computed<AcademicTerm | null>(() => {
+  return props.academicTerms?.find(t => t.is_active) || null
+})
+
 /* ----------------------- LOCAL FORM ----------------------- */
 
 const local = ref<ClassFormPayload>({
@@ -159,9 +165,9 @@ const local = ref<ClassFormPayload>({
   academic_term_id: null
 })
 
-/* ----------------------- LOAD DATA ----------------------- */
 const editing = ref(false)
 
+/* ----------------------- LOAD DATA ----------------------- */
 watch(
   () => props.data,
   (val) => {
@@ -170,19 +176,27 @@ watch(
       editing.value = true
       local.value = { ...val }
     } else {
-      // Create mode — auto-select active term
+      // Create mode — reset and try to auto-select active term
       editing.value = false
       resetForm()
-
-      const activeTerm = props.academicTerms?.find(t => t.is_active)
-      if (activeTerm) {
-        local.value.academic_term_id = activeTerm.id
-      }
     }
   },
   { immediate: true }
 )
 
+/* Also react when dialog opens (for create) and active term is known */
+watch(
+  () => model.value,
+  (isOpen) => {
+    if (!isOpen) return
+    if (editing.value) return
+    if (local.value.academic_term_id) return
+
+    if (activeTerm.value) {
+      local.value.academic_term_id = activeTerm.value.id
+    }
+  }
+)
 
 /* ----------------------- VALIDATION ----------------------- */
 const isValid = computed(() =>
@@ -191,6 +205,8 @@ const isValid = computed(() =>
   !!local.value.section.trim() &&
   !!local.value.academic_term_id
 )
+
+const saving = computed(() => props.saving ?? false)
 
 /* ----------------------- METHODS ----------------------- */
 
@@ -204,6 +220,11 @@ function resetForm() {
     adviser_id: null,
     remarks: "",
     academic_term_id: null
+  }
+
+  // If there is an active term, pre-select it
+  if (activeTerm.value) {
+    local.value.academic_term_id = activeTerm.value.id
   }
 }
 

@@ -5,54 +5,44 @@ export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
 
   const query = getQuery(event)
-  const role = (query.role as string) || "ADMIN"
-  const departmentId = (query.department_id as string) || ""
 
-  let q = supabase
-    .from("classes")
-    .select(`
-      id,
-      department_id,
-      year_level_number,
-      year_level_label,
-      section,
-      class_name,
-      adviser_id,
-      remarks,
-      is_archived,
-      academic_term_id,
-      academic_term:academic_term_id (
-        id,
-        semester,
-        academic_year,
-        label
-      ),
-      adviser:adviser_id (
-        id,
-        first_name,
-        last_name
-      )
-    `)
-    .order("year_level_number", { ascending: true })
-    .order("section", { ascending: true })
+  const role = (query.role?.toString() || "DEAN").toUpperCase()
+  const departmentId = query.department_id?.toString() || ""
+  const academicTermId = query.academic_term_id?.toString() || ""
+  const includeArchived = query.include_archived === "true"
 
+  let request = supabase.from("classes").select("*")
+
+  // ----- ROLE-BASED FILTERING -----
   if (role === "DEAN" && departmentId) {
-    q = q.eq("department_id", departmentId)
+    // Program dean: only their department
+    request = request.eq("department_id", departmentId)
+  } else if (role === "ADMIN" || role === "GENED") {
+    // Admin + GenEd dean: can see all, optional department filter
+    if (departmentId) {
+      request = request.eq("department_id", departmentId)
+    }
   }
 
-  const { data, error } = await q
+  // Filter by academic term if provided
+  if (academicTermId) {
+    request = request.eq("academic_term_id", academicTermId)
+  }
+
+  // Exclude archived by default
+  if (!includeArchived) {
+    request = request.eq("is_archived", false)
+  }
+
+  // Order: Year level ASC, then Section ASC, then Program name ASC
+  const { data, error } = await request
+    .order("year_level_number", { ascending: true })
+    .order("section", { ascending: true })
+    .order("program_name", { ascending: true })
 
   if (error) {
     return { error: error.message }
   }
 
-  const normalized = (data || []).map((row: any) => ({
-    ...row,
-    academic_term: Array.isArray(row.academic_term)
-      ? row.academic_term[0]
-      : row.academic_term,
-    adviser: Array.isArray(row.adviser) ? row.adviser[0] : row.adviser
-  }))
-
-  return normalized
+  return data || []
 })

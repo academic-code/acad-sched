@@ -1,93 +1,89 @@
 // server/api/classes/create.post.ts
 import { readBody } from "h3"
 
+function yearLabelFromNumber(n: number): string {
+  if (n === 1) return "1st Year"
+  if (n === 2) return "2nd Year"
+  if (n === 3) return "3rd Year"
+  if (n === 4) return "4th Year"
+  return `${n}th Year`
+}
+
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
   const body = await readBody<any>(event)
 
-  const {
-    department_id,
-    year_level_number,
-    section,
-    academic_term_id,
-    adviser_id,
-    remarks,
-    is_archived
-  } = body
+  const department_id = body.department_id as string | undefined
+  const program_name_raw = body.program_name as string | undefined
+  const year_level_number = body.year_level_number as number | undefined
+  const section_raw = body.section as string | undefined
+  const class_name_raw = body.class_name as string | undefined
+  const academic_term_id = body.academic_term_id as string | undefined
+  const adviser_id = body.adviser_id as string | null | undefined
+  const remarks = body.remarks as string | undefined
+  const created_by = body.created_by as string | null | undefined
 
-  if (!department_id) return { error: "Missing department." }
+  // ----- REQUIRED FIELD CHECKS -----
+  if (!department_id) return { error: "Department is required." }
+  if (!program_name_raw || !program_name_raw.trim()) return { error: "Program name is required." }
   if (!year_level_number) return { error: "Year level is required." }
-  if (!section || !section.trim()) return { error: "Section is required." }
+  if (!section_raw || !section_raw.trim()) return { error: "Section is required." }
+  if (!class_name_raw || !class_name_raw.trim()) return { error: "Class name is required." }
   if (!academic_term_id) return { error: "Academic term is required." }
 
-  // Get department name for class_name
-  const { data: dept, error: deptErr } = await supabase
-    .from("departments")
-    .select("name")
-    .eq("id", department_id)
+  const program_name = program_name_raw.trim()
+  const section = section_raw.trim().toUpperCase()
+  const class_name = class_name_raw.trim()
+  const year_level_label = body.year_level_label || yearLabelFromNumber(year_level_number)
+
+  // ----- UNIQUENESS CHECK (FRIENDLY) -----
+  const { data: existing, error: checkErr } = await supabase
+    .from("classes")
+    .select("id")
+    .match({
+      academic_term_id,
+      program_name,
+      year_level_number,
+      section
+    })
     .maybeSingle()
 
-  if (deptErr || !dept) return { error: "Department not found." }
-
-  const yearLabel = (() => {
-    if (year_level_number === 1) return "1st Year"
-    if (year_level_number === 2) return "2nd Year"
-    if (year_level_number === 3) return "3rd Year"
-    if (year_level_number === 4) return "4th Year"
-    return `${year_level_number}th Year`
-  })()
-
-  const className = `${dept.name} ${yearLabel} ${section.trim()}`
-
-  const { data, error } = await supabase
-    .from("classes")
-    .insert({
-      department_id,
-      year_level_number,
-      year_level_label: yearLabel,
-      section: section.trim(),
-      class_name: className,
-      academic_term_id,
-      adviser_id: adviser_id || null,
-      remarks: remarks || null,
-      is_archived: !!is_archived
-    })
-    .select(`
-      id,
-      department_id,
-      year_level_number,
-      year_level_label,
-      section,
-      class_name,
-      adviser_id,
-      remarks,
-      is_archived,
-      academic_term_id,
-      academic_term:academic_term_id (
-        id,
-        semester,
-        academic_year,
-        label
-      ),
-      adviser:adviser_id (
-        id,
-        first_name,
-        last_name
-      )
-    `)
-    .single()
-
-  if (error) return { error: error.message }
-
-  const normalized = {
-    ...data,
-    academic_term: Array.isArray((data as any).academic_term)
-      ? (data as any).academic_term[0]
-      : (data as any).academic_term,
-    adviser: Array.isArray((data as any).adviser)
-      ? (data as any).adviser[0]
-      : (data as any).adviser
+  if (checkErr) {
+    return { error: checkErr.message }
   }
 
-  return { success: true, class: normalized }
+  if (existing) {
+    return {
+      error:
+        "A class with the same Program, Year Level, Section, and Term already exists."
+    }
+  }
+
+  // ----- INSERT -----
+  const { error } = await supabase.from("classes").insert({
+    department_id,
+    program_name,
+    year_level_number,
+    year_level_label,
+    section,
+    class_name,
+    adviser_id: adviser_id || null,
+    remarks: remarks || null,
+    is_archived: false,
+    academic_term_id,
+    created_by: created_by || null
+  })
+
+  // Handle DB unique constraint in case of race condition
+  if (error) {
+    if ((error as any).code === "23505") {
+      return {
+        error:
+          "A class with the same Program, Year Level, Section, and Term already exists."
+      }
+    }
+    return { error: error.message }
+  }
+
+  return { success: true }
 })

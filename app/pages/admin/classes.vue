@@ -1,179 +1,121 @@
-<!-- app/pages/admin/classes.vue -->
 <template>
   <div>
     <h1 class="text-h5 font-weight-bold mb-6">Classes</h1>
 
-    <!-- FILTER BAR -->
-    <v-row class="mb-4">
-      <v-col cols="12" md="4">
-        <v-text-field
-          v-model="search"
-          label="Search class..."
-          prepend-inner-icon="mdi-magnify"
-          variant="outlined"
-          density="comfortable"
-        />
-      </v-col>
-
-      <v-col cols="12" md="4">
-        <v-select
-          v-model="selectedDepartment"
-          :items="departments"
-          item-title="name"
-          item-value="id"
-          label="Filter by Department"
-          variant="outlined"
-          density="comfortable"
-          clearable
-        />
-      </v-col>
-
-      <v-col cols="12" md="4">
-        <v-select
-          v-model="selectedTerm"
-          :items="academicTerms"
-          item-title="labelDisplay"
-          item-value="id"
-          label="Filter by Academic Term"
-          variant="outlined"
-          density="comfortable"
-          clearable
-        />
-      </v-col>
-    </v-row>
-
-    <v-switch v-model="showArchived" label="Show archived" inset class="mb-4" />
-
-    <!-- TABLE -->
-    <v-card elevation="1">
-      <v-data-table :headers="headers" :items="filteredClasses" :items-per-page="15">
-        <template #item.department="{ item }">
-          {{ departmentName(item.department_id) }}
-        </template>
-
-        <template #item.adviser="{ item }">
-          {{ adviserName(item) }}
-        </template>
-
-        <template #item.academic_term="{ item }">
-          <span v-if="item.academic_term">
-            {{ formatTerm(item.academic_term) }}
-          </span>
-          <span v-else>—</span>
-        </template>
-
-        <template #item.is_archived="{ item }">
-          <v-chip
-            size="small"
-            :color="item.is_archived ? 'grey-darken-2' : 'green-lighten-4'"
-            :text-color="item.is_archived ? 'white' : 'green-darken-2'"
-          >
-            {{ item.is_archived ? "Archived" : "Active" }}
-          </v-chip>
-        </template>
-
-        <template #no-data>
-          <div class="text-center pa-5 text-grey-darken-1">No classes found.</div>
-        </template>
-      </v-data-table>
-    </v-card>
+    <ClassTable
+      :classes="classesForTable"
+      :departments="departments"
+      role="ADMIN"
+    />
 
     <AppAlert />
   </div>
 </template>
 
-
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue"
-import type { DataTableHeader } from "vuetify"
+import ClassTable from "~/components/ClassTable.vue"
+import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
+import type { AcademicTerm, FacultyOption } from "../../../types/Class"
 
 definePageMeta({ layout: "admin" })
 
 const { $supabase } = useNuxtApp()
 const { showAlert } = useAlert()
 
-/* --- DATA SOURCES --- */
 const classes = ref<any[]>([])
 const departments = ref<{ id: string; name: string }[]>([])
-const terms = ref<any[]>([])
+const academicTerms = ref<AcademicTerm[]>([])
+const faculty = ref<FacultyOption[]>([])
 
-/* --- UI STATE --- */
-const search = ref("")
-const selectedDepartment = ref<string | null>(null)
-const selectedTerm = ref<string | null>(null)
-const showArchived = ref(false)
+/* ---------- COMPUTED ---------- */
 
-/* --- TABLE HEADERS --- */
-const headers: DataTableHeader[] = [
-  { title: "Class Name", key: "class_name", align: "start" },
-  { title: "Department", key: "department_id", align: "start" },
-  { title: "Year Level", key: "year_level_label", align: "center" },
-  { title: "Section", key: "section", align: "center" },
-  { title: "Adviser", key: "adviser", align: "center" },
-  { title: "Term", key: "academic_term", align: "center" },
-  { title: "Status", key: "is_archived", align: "center" },
-]
+const classesForTable = computed(() => {
+  const termMap = new Map(
+    academicTerms.value.map((t) => [
+      t.id,
+      `${t.academic_year} - ${t.semester}`
+    ])
+  )
 
-/* --- HELPERS --- */
-function departmentName(id: string) {
-  return departments.value.find(d => d.id === id)?.name || "—"
-}
+  const facultyMap = new Map(
+    faculty.value.map((f) => [f.id, f.full_name])
+  )
 
-function adviserName(row: any) {
-  if (!row?.adviser) return "—"
-  return `${row.adviser.first_name} ${row.adviser.last_name}`
-}
-
-function formatTerm(term: any) {
-  if (!term) return "—"
-  return `${term.academic_year} • ${term.semester}`
-}
-
-/* --- FILTERED LIST --- */
-const filteredClasses = computed(() => {
-  let list = [...classes.value]
-
-  if (selectedDepartment.value) list = list.filter(c => c.department_id === selectedDepartment.value)
-  if (selectedTerm.value) list = list.filter(c => c.academic_term?.id === selectedTerm.value)
-  if (!showArchived.value) list = list.filter(c => !c.is_archived)
-
-  if (search.value.trim()) {
-    const q = search.value.toLowerCase()
-    list = list.filter(c => c.class_name.toLowerCase().includes(q) || c.section.toLowerCase().includes(q))
-  }
-
-  return list
+  return classes.value.map((c: any) => ({
+    ...c,
+    adviser_name: c.adviser_id ? facultyMap.get(c.adviser_id) || "" : "",
+    term_label: c.academic_term_id
+      ? termMap.get(c.academic_term_id) || ""
+      : ""
+  }))
 })
 
-/* --- LOADERS --- */
+/* ---------- LOADERS ---------- */
+
 async function loadDepartments() {
-  const { data } = await $supabase.from("departments").select("id,name")
-  departments.value = data || []
+  const { data, error } = await $supabase
+    .from("departments")
+    .select("id, name")
+    .order("name", { ascending: true })
+
+  if (error) {
+    showAlert("error", "Failed to load departments.")
+    return
+  }
+
+  departments.value = (data || []) as { id: string; name: string }[]
 }
 
 async function loadAcademicTerms() {
-  const { data } = await $supabase.from("academic_terms").select("*")
-  terms.value = data || []
+  const { data, error } = await $supabase
+    .from("academic_terms")
+    .select("id, academic_year, semester")
+    .order("academic_year", { ascending: false })
+    .order("semester", { ascending: false })
+
+  if (error) {
+    showAlert("error", "Failed to load academic terms.")
+    return
+  }
+
+  academicTerms.value = (data || []) as AcademicTerm[]
+}
+
+async function loadFaculty() {
+  const { data, error } = await $supabase
+    .from("faculty")
+    .select("id, first_name, last_name")
+
+  if (error) {
+    showAlert("error", "Failed to load faculty.")
+    return
+  }
+
+  faculty.value =
+    (data || []).map((f: any) => ({
+      id: f.id,
+      full_name: `${f.last_name}, ${f.first_name}`
+    })) as FacultyOption[]
 }
 
 async function loadClasses() {
-  const res = await $fetch<any[]>("/api/classes/list", { query: { role: "ADMIN" } })
-  classes.value = Array.isArray(res) ? res : []
+  const res = await $fetch("/api/classes/list", {
+    query: {
+      role: "ADMIN"
+    }
+  })
+
+  classes.value = Array.isArray(res) ? (res as any[]) : []
 }
 
-/* FOR DROPDOWN DISPLAY */
-const academicTerms = computed(() =>
-  terms.value.map(t => ({
-    ...t,
-    labelDisplay: `${t.academic_year} • ${t.semester}`,
-  }))
-)
+/* ---------- INIT ---------- */
 
-/* --- INIT --- */
 onMounted(async () => {
   await loadDepartments()
   await loadAcademicTerms()
+  await loadFaculty()
   await loadClasses()
 })
 </script>

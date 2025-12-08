@@ -1,125 +1,89 @@
 // server/api/classes/update.put.ts
 import { readBody } from "h3"
 
+function yearLabelFromNumber(n: number): string {
+  if (n === 1) return "1st Year"
+  if (n === 2) return "2nd Year"
+  if (n === 3) return "3rd Year"
+  if (n === 4) return "4th Year"
+  return `${n}th Year`
+}
+
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
   const body = await readBody<any>(event)
 
-  const { id } = body
+  const id = body.id as string | undefined
   if (!id) return { error: "Missing class ID." }
 
-  // Fetch current row to support partial updates and recomputing labels
-  const { data: current, error: currentErr } = await supabase
+  const department_id = body.department_id as string | undefined
+  const program_name_raw = body.program_name as string | undefined
+  const year_level_number = body.year_level_number as number | undefined
+  const section_raw = body.section as string | undefined
+  const class_name_raw = body.class_name as string | undefined
+  const academic_term_id = body.academic_term_id as string | undefined
+  const adviser_id = body.adviser_id as string | null | undefined
+  const remarks = body.remarks as string | undefined
+
+  if (!department_id) return { error: "Department is required." }
+  if (!program_name_raw || !program_name_raw.trim()) return { error: "Program name is required." }
+  if (!year_level_number) return { error: "Year level is required." }
+  if (!section_raw || !section_raw.trim()) return { error: "Section is required." }
+  if (!class_name_raw || !class_name_raw.trim()) return { error: "Class name is required." }
+  if (!academic_term_id) return { error: "Academic term is required." }
+
+  const program_name = program_name_raw.trim()
+  const section = section_raw.trim().toUpperCase()
+  const class_name = class_name_raw.trim()
+  const year_level_label = body.year_level_label || yearLabelFromNumber(year_level_number)
+
+  // ----- UNIQUENESS CHECK (excluding this ID) -----
+  const { data: conflict, error: checkErr } = await supabase
     .from("classes")
-    .select("department_id, year_level_number, year_level_label, section, class_name")
-    .eq("id", id)
+    .select("id")
+    .match({
+      academic_term_id,
+      program_name,
+      year_level_number,
+      section
+    })
+    .neq("id", id)
     .maybeSingle()
 
-  if (currentErr || !current) {
-    return { error: "Class not found." }
-  }
+  if (checkErr) return { error: checkErr.message }
 
-  const departmentId = body.department_id || current.department_id
-  const yearLevelNumber = body.year_level_number || current.year_level_number
-  const section =
-    typeof body.section === "string" ? body.section.trim() : current.section
-
-  const updatePayload: any = {}
-
-  // Always keep department/year/section in sync when provided
-  if (body.department_id) updatePayload.department_id = departmentId
-  if (body.year_level_number) updatePayload.year_level_number = yearLevelNumber
-  if (body.section !== undefined) updatePayload.section = section
-
-  if (body.academic_term_id) {
-    updatePayload.academic_term_id = body.academic_term_id
-  }
-
-  if ("adviser_id" in body) {
-    updatePayload.adviser_id = body.adviser_id || null
-  }
-
-  if ("remarks" in body) {
-    updatePayload.remarks = body.remarks || null
-  }
-
-  if ("is_archived" in body) {
-    updatePayload.is_archived = !!body.is_archived
-  }
-
-  // Recompute year_level_label + class_name when level/section/department changed
-  const levelChanged = !!body.year_level_number
-  const sectionChanged = body.section !== undefined
-  const deptChanged = !!body.department_id
-
-  if (levelChanged || sectionChanged || deptChanged) {
-    const yearLabel = (() => {
-      if (yearLevelNumber === 1) return "1st Year"
-      if (yearLevelNumber === 2) return "2nd Year"
-      if (yearLevelNumber === 3) return "3rd Year"
-      if (yearLevelNumber === 4) return "4th Year"
-      return `${yearLevelNumber}th Year`
-    })()
-
-    updatePayload.year_level_label = yearLabel
-
-    // Get department for name
-    const { data: dept, error: deptErr } = await supabase
-      .from("departments")
-      .select("name")
-      .eq("id", departmentId)
-      .maybeSingle()
-
-    if (deptErr || !dept) {
-      return { error: "Department not found for class update." }
+  if (conflict) {
+    return {
+      error:
+        "Another class with the same Program, Year Level, Section, and Term already exists."
     }
-
-    updatePayload.class_name = `${dept.name} ${yearLabel} ${section}`
   }
 
-  // (rename_mode is accepted but not used yet; you can log it if needed)
-  // const renameMode = body.rename_mode as "CASCADE" | "LOCAL" | undefined
-
-  const { data, error } = await supabase
+  // ----- UPDATE -----
+  const { error } = await supabase
     .from("classes")
-    .update(updatePayload)
-    .eq("id", id)
-    .select(`
-      id,
+    .update({
       department_id,
+      program_name,
       year_level_number,
       year_level_label,
       section,
       class_name,
-      adviser_id,
-      remarks,
-      is_archived,
-      academic_term_id,
-      academic_term:academic_term_id (
-        id,
-        semester,
-        academic_year,
-        label
-      ),
-      adviser:adviser_id (
-        id,
-        first_name,
-        last_name
-      )
-    `)
-    .single()
+      adviser_id: adviser_id || null,
+      remarks: remarks || null,
+      academic_term_id
+    })
+    .eq("id", id)
 
-  if (error) return { error: error.message }
-
-  const normalized = {
-    ...data,
-    academic_term: Array.isArray((data as any).academic_term)
-      ? (data as any).academic_term[0]
-      : (data as any).academic_term,
-    adviser: Array.isArray((data as any).adviser)
-      ? (data as any).adviser[0]
-      : (data as any).adviser
+  if (error) {
+    if ((error as any).code === "23505") {
+      return {
+        error:
+          "Another class with the same Program, Year Level, Section, and Term already exists."
+      }
+    }
+    return { error: error.message }
   }
 
-  return { success: true, class: normalized }
+  return { success: true }
 })

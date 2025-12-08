@@ -1,28 +1,25 @@
 // /types/Class.ts
-export interface ClassRow {
-  id?: string
-  department_id: string
-  year_level_number: number
-  year_level_label: string
-  section: string
-  class_name: string
-  adviser_id?: string | null
-  remarks?: string | null
-  is_archived?: boolean
-  academic_term_id?: string | null
-  created_by?: string | null
+
+export type SemesterType = "1ST" | "2ND" | "SUMMER"
+
+export interface AcademicTerm {
+  id: string
+  academic_year: string
+  semester: SemesterType
 }
 
-export interface ClassWithExtras extends ClassRow {
-  academic_term?: {
-    id: string
-    semester: string
-    academic_year: string
-    label?: string | null
-  } | null
-  adviser?: {
-    id: string
-    first_name: string
-    last_name: string
-  } | null
+export interface FacultyOption {
+  id: string
+  full_name: string
+}
+
+export interface ClassFormPayload {
+  id?: string
+  class_name: string
+  program_name: string
+  year_level_number: number
+  section: string
+  adviser_id: string | null
+  remarks?: string
+  academic_term_id: string | null
 }

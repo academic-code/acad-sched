@@ -1,201 +1,55 @@
-<!-- app/pages/dean/classes.vue -->
 <template>
   <div>
     <h1 class="text-h5 font-weight-bold mb-6">Classes</h1>
 
-    <!-- CREATE / EDIT DIALOG -->
-    <v-dialog v-model="modal" width="520">
+    <!-- CLASS FORM (PROGRAM DEAN ONLY) -->
+    <ClassForm
+      v-if="!isGenEdDean"
+      v-model="formModal"
+      :data="selected"
+      :academic-terms="academicTerms"
+      :faculty="adviserOptions"
+      :saving="saving"
+      @save="handleSave"
+    />
+
+    <!-- DELETE CONFIRM (PROGRAM DEAN ONLY) -->
+    <v-dialog v-model="deleteDialog" width="480" v-if="!isGenEdDean">
       <v-card class="pa-4">
-        <h3 class="text-h6 font-weight-medium mb-4">
-          {{ form.id ? "Edit Class" : "Create Class" }}
-        </h3>
+        <h3 class="text-h6 font-weight-medium mb-2">Delete Class</h3>
+        <p class="mb-4">
+          Are you sure you want to delete
+          <strong>{{ pendingDelete?.class_name }}</strong>?
+        </p>
 
-        <!-- Year Level + Section -->
-        <v-row>
-          <v-col cols="6">
-            <v-select
-              v-model="form.year_level_number"
-              :items="yearLevels"
-              item-title="label"
-              item-value="value"
-              label="Year Level"
-              variant="outlined"
-              density="comfortable"
-            />
-          </v-col>
-          <v-col cols="6">
-            <v-text-field
-              v-model="form.section"
-              label="Section"
-              placeholder="A"
-              variant="outlined"
-              density="comfortable"
-            />
-          </v-col>
-        </v-row>
-
-        <!-- Academic Term -->
-        <v-select
-          v-model="form.academic_term_id"
-          :items="academicTerms"
-          item-title="labelDisplay"
-          item-value="id"
-          label="Academic Term"
-          variant="outlined"
-          density="comfortable"
-          class="mb-3"
-        />
-
-        <!-- Adviser (optional) -->
-        <v-select
-          v-model="form.adviser_id"
-          :items="facultyOptions"
-          item-title="label"
-          item-value="id"
-          label="Adviser (optional)"
-          variant="outlined"
-          density="comfortable"
-          clearable
-          class="mb-3"
-        />
-
-        <v-textarea
-          v-model="form.remarks"
-          label="Remarks"
-          variant="outlined"
-          density="comfortable"
-          rows="2"
-        />
-
-        <v-switch
-          v-model="form.is_archived"
-          label="Archived"
-          inset
-          class="mt-2"
-        />
+        <p class="text-body-2 text-red-darken-1">
+          This action cannot be undone. You cannot delete a class if it is already
+          used in schedules or other records.
+        </p>
 
         <div class="d-flex justify-end mt-4">
-          <v-btn variant="text" @click="modal = false">Cancel</v-btn>
+          <v-btn variant="text" @click="deleteDialog = false">Cancel</v-btn>
           <v-btn
-            color="primary"
+            color="red"
             class="ml-2"
-            :loading="saving"
-            @click="save"
-            :disabled="isGenEdDean"
+            :loading="deleting"
+            @click="executeDelete"
           >
-            Save
+            Delete
           </v-btn>
         </div>
       </v-card>
     </v-dialog>
 
-    <!-- TOP BAR -->
-    <div class="d-flex justify-space-between align-center mb-4">
-      <v-text-field
-        v-model="search"
-        placeholder="Search class..."
-        prepend-inner-icon="mdi-magnify"
-        variant="outlined"
-        density="comfortable"
-        hide-details
-        style="max-width: 260px"
-      />
-
-      <div class="d-flex align-center">
-        <v-switch
-          v-model="showArchived"
-          label="Show archived"
-          hide-details
-          inset
-          class="mr-4"
-        />
-
-        <v-btn
-          v-if="!isGenEdDean"
-          color="primary"
-          prepend-icon="mdi-plus"
-          @click="openCreate"
-        >
-          Create Class
-        </v-btn>
-      </div>
-    </div>
-
-    <!-- TABLE -->
-    <v-card elevation="1">
-      <v-data-table
-        :headers="headers"
-        :items="filteredClasses"
-        :items-per-page="10"
-        class="text-body-2"
-      >
-        <template #item.adviser="{ item }">
-          {{ adviserName(item) }}
-        </template>
-
-        <template #item.academic_term="{ item }">
-          <span v-if="item.academic_term">
-            {{ formatTerm(item.academic_term) }}
-          </span>
-          <span v-else>—</span>
-        </template>
-
-        <template #item.is_archived="{ item }">
-          <v-chip
-            size="small"
-            :color="item.is_archived ? 'grey-darken-2' : 'green-lighten-4'"
-            :text-color="item.is_archived ? 'white' : 'green-darken-2'"
-          >
-            {{ item.is_archived ? "Archived" : "Active" }}
-          </v-chip>
-        </template>
-
-        <template #item.actions="{ item }">
-          <!-- Normal dean actions -->
-          <template v-if="!isGenEdDean">
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              color="indigo"
-              @click="openEdit(item)"
-            >
-              <v-icon>mdi-pencil</v-icon>
-            </v-btn>
-
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              color="orange-darken-2"
-              @click="assignSubjects(item)"
-            >
-              <v-icon>mdi-book-multiple</v-icon>
-            </v-btn>
-
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              :color="item.is_archived ? 'green' : 'red'"
-              @click="toggleArchive(item)"
-            >
-              <v-icon>
-                {{ item.is_archived ? "mdi-restore" : "mdi-archive" }}
-              </v-icon>
-            </v-btn>
-          </template>
-
-          <!-- GenEd dean: view-only, so no action buttons -->
-        </template>
-
-        <template #no-data>
-          <div class="text-center pa-5 text-grey-darken-1">
-            No classes found.
-          </div>
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- CLASSES TABLE -->
+    <ClassTable
+      :classes="classesForTable"
+      :departments="departments"
+      :role="isGenEdDean ? 'GENED' : 'DEAN'"
+      @create="openCreate"
+      @edit="openEdit"
+      @delete="requestDelete"
+    />
 
     <AppAlert />
   </div>
@@ -203,377 +57,283 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue"
+import ClassTable from "~/components/ClassTable.vue"
+import ClassForm from "~/components/ClassForm.vue"
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
+import type {
+  AcademicTerm,
+  FacultyOption,
+  ClassFormPayload
+} from "../../../types/Class"
 
 definePageMeta({ layout: "dean" })
 
 const { $supabase } = useNuxtApp()
 const { showAlert } = useAlert()
 
-/* --- DATA SOURCES --- */
-const classes = ref<any[]>([])
-const deanDepartmentId = ref("")
-const advisers = ref<any[]>([])
-const terms = ref<any[]>([])
+/* ---------- STATE ---------- */
 
-/* --- ROLE LOGIC --- */
+const classes = ref<any[]>([])
+const departments = ref<{ id: string; name: string }[]>([])
+const academicTerms = ref<AcademicTerm[]>([])
+const faculty = ref<FacultyOption[]>([])
+
+const deanDepartmentId = ref<string | null>(null)
+const deanUserId = ref<string | null>(null)
 const isGenEdDean = ref(false)
 
-/* --- FORM STATE --- */
-const modal = ref(false)
+/* FORM STATE (PROGRAM DEAN) */
+const formModal = ref(false)
 const saving = ref(false)
-const editingOriginal = ref<any | null>(null)
+const selected = ref<ClassFormPayload | null>(null)
 
-const form = ref<any>({
-  id: null,
-  year_level_number: 1,
-  section: "",
-  academic_term_id: "",
-  adviser_id: null,
-  remarks: "",
-  is_archived: false
-})
+/* DELETE STATE (PROGRAM DEAN) */
+const deleteDialog = ref(false)
+const pendingDelete = ref<any | null>(null)
+const deleting = ref(false)
 
-/* --- UI STATE --- */
-const search = ref("")
-const showArchived = ref(false)
+/* ---------- COMPUTED ---------- */
 
-/* --- DROPDOWNS --- */
-const yearLevels = [
-  { label: "1st Year", value: 1 },
-  { label: "2nd Year", value: 2 },
-  { label: "3rd Year", value: 3 },
-  { label: "4th Year", value: 4 }
-]
+// Advisers dropdown: program dean → only same department; GenEd dean (read-only) still uses names
+const adviserOptions = computed<FacultyOption[]>(() => faculty.value)
 
-const facultyOptions = computed(() =>
-  advisers.value.map(f => ({
-    id: f.id,
-    label: `${f.first_name} ${f.last_name}`
-  }))
-)
-
-const academicTerms = computed(() =>
-  terms.value.map(t => ({
-    ...t,
-    labelDisplay: `${t.academic_year} • ${t.semester}`
-  }))
-)
-
-/* --- TABLE HEADERS (typed any[] to avoid Vuetify TS issues) --- */
-const headers: any[] = [
-  { title: "Class", key: "class_name" },
-  { title: "Year Level", key: "year_level_label", align: "center" },
-  { title: "Section", key: "section", align: "center" },
-  { title: "Adviser", key: "adviser", align: "center" },
-  { title: "Academic Term", key: "academic_term", align: "center" },
-  { title: "Status", key: "is_archived", align: "center" },
-  { title: "Actions", key: "actions", align: "center" },
-]
-
-/* --- HELPERS --- */
-function adviserName(row: any) {
-  if (!row?.adviser) return "—"
-  return `${row.adviser.first_name} ${row.adviser.last_name}`
-}
-
-function formatTerm(term: any) {
-  if (!term) return "—"
-  return `${term.academic_year} • ${term.semester}`
-}
-
-/* --- LIST FILTERING --- */
-const filteredClasses = computed(() => {
-  let list = [...classes.value]
-
-  if (!showArchived.value) {
-    list = list.filter(c => !c.is_archived)
-  }
-
-  if (search.value.trim()) {
-    const q = search.value.toLowerCase()
-    list = list.filter(c =>
-      c.class_name?.toLowerCase().includes(q) ||
-      c.section?.toLowerCase().includes(q)
-    )
-  }
-
-  return list
-})
-
-/* --- ACTIONS --- */
-function openCreate() {
-  if (isGenEdDean.value) {
-    showAlert("error", "GenEd dean cannot create classes.")
-    return
-  }
-
-  editingOriginal.value = null
-
-  form.value = {
-    id: null,
-    year_level_number: 1,
-    section: "",
-    academic_term_id: terms.value.find(t => t.is_active)?.id || "",
-    adviser_id: null,
-    remarks: "",
-    is_archived: false
-  }
-
-  modal.value = true
-}
-
-function openEdit(item: any) {
-  if (isGenEdDean.value) {
-    showAlert("error", "GenEd dean cannot edit classes.")
-    return
-  }
-
-  editingOriginal.value = structuredClone(item)
-
-  form.value = {
-    id: item.id,
-    year_level_number: item.year_level_number,
-    section: item.section,
-    academic_term_id: item.academic_term_id,
-    adviser_id: item.adviser_id,
-    remarks: item.remarks || "",
-    is_archived: !!item.is_archived
-  }
-
-  modal.value = true
-}
-
-/**
- * Assign subjects to class (auto based on current or class term)
- */
-async function assignSubjects(item: any) {
-  if (isGenEdDean.value) {
-    showAlert("error", "GenEd dean cannot assign subjects.")
-    return
-  }
-
-  const ok = window.confirm(
-    "Assign matching subjects now based on this class' year level and academic term?"
+// Map classes with adviser_name + term_label for table
+const classesForTable = computed(() => {
+  const termMap = new Map(
+    academicTerms.value.map((t) => [
+      t.id,
+      `${t.academic_year} - ${t.semester}`
+    ])
   )
-  if (!ok) return
 
-  const res = await $fetch<any>("/api/classes/assign-subjects", {
-    method: "POST",
-    body: { class_id: item.id }
-  })
+  const facultyMap = new Map(
+    faculty.value.map((f) => [f.id, f.full_name])
+  )
 
-  if (res?.error) {
-    showAlert("error", res.error)
+  return classes.value.map((c: any) => ({
+    ...c,
+    adviser_name: c.adviser_id ? facultyMap.get(c.adviser_id) || "" : "",
+    term_label: c.academic_term_id
+      ? termMap.get(c.academic_term_id) || ""
+      : ""
+  }))
+})
+
+/* ---------- LOADERS ---------- */
+
+async function loadDeanContext() {
+  const { data } = await $supabase.auth.getUser()
+  const authUser = data?.user
+  if (!authUser) return
+
+  const { data: userRow, error: userErr } = await $supabase
+    .from("users")
+    .select("id, department_id")
+    .eq("auth_user_id", authUser.id)
+    .maybeSingle()
+
+  if (userErr || !userRow?.department_id) {
+    showAlert("error", "Unable to load dean profile.")
     return
   }
 
-  const count = res?.assignedCount ?? 0
-  const label = res?.termLabel || "current term"
-  showAlert("success", `${count} subjects automatically assigned (${label}).`)
+  deanDepartmentId.value = userRow.department_id
+  deanUserId.value = userRow.id
+
+  const { data: deptRow } = await $supabase
+    .from("departments")
+    .select("type")
+    .eq("id", userRow.department_id)
+    .maybeSingle()
+
+  isGenEdDean.value = deptRow?.type === "GENED"
 }
 
-/**
- * Toggle archive / restore
- */
-async function toggleArchive(item: any) {
-  if (isGenEdDean.value) {
-    showAlert("error", "GenEd dean cannot archive classes.")
+async function loadDepartments() {
+  const { data, error } = await $supabase
+    .from("departments")
+    .select("id, name")
+    .order("name", { ascending: true })
+
+  if (error) {
+    showAlert("error", "Failed to load departments.")
     return
   }
 
-  const nowArchived = !item.is_archived
-  const msg = nowArchived
-    ? "Archive this class? It will be hidden from active scheduling."
-    : "Restore this class as active?"
-
-  const ok = window.confirm(msg)
-  if (!ok) return
-
-  const res = await $fetch<any>("/api/classes/archive", {
-    method: "POST",
-    body: { id: item.id, is_archived: nowArchived }
-  })
-
-  if (res?.error) {
-    showAlert("error", res.error)
-    return
-  }
-
-  await loadClasses()
-  showAlert("success", nowArchived ? "Class archived." : "Class restored.")
+  departments.value = (data || []) as { id: string; name: string }[]
 }
 
-/* --- SAVE (create / update with Option C rename confirmation) --- */
-async function save() {
-  if (isGenEdDean.value) {
-    showAlert("error", "GenEd dean cannot modify classes.")
+async function loadAcademicTerms() {
+  const { data, error } = await $supabase
+    .from("academic_terms")
+    .select("id, academic_year, semester")
+    .order("academic_year", { ascending: false })
+    .order("semester", { ascending: false })
+
+  if (error) {
+    showAlert("error", "Failed to load academic terms.")
     return
   }
 
-  if (!deanDepartmentId.value) {
-    showAlert("error", "Dean department not detected.")
+  academicTerms.value = (data || []) as AcademicTerm[]
+}
+
+async function loadFaculty() {
+  // GenEd dean is read-only, but for display they can see adviser names across departments
+  let query = $supabase
+    .from("faculty")
+    .select("id, first_name, last_name, department_id, is_active")
+
+  if (!isGenEdDean.value && deanDepartmentId.value) {
+    query = query.eq("department_id", deanDepartmentId.value)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    showAlert("error", "Failed to load faculty.")
     return
   }
 
-  if (!form.value.section.trim()) {
-    showAlert("error", "Section is required.")
+  faculty.value =
+    (data || []).map((f: any) => ({
+      id: f.id,
+      full_name: `${f.last_name}, ${f.first_name}`
+    })) as FacultyOption[]
+}
+
+async function loadClasses() {
+  const role = isGenEdDean.value ? "GENED" : "DEAN"
+
+  const query: Record<string, string> = {
+    role
+  }
+
+  if (!isGenEdDean.value && deanDepartmentId.value) {
+    query.department_id = deanDepartmentId.value
+  }
+
+  const res = await $fetch("/api/classes/list", {
+    query
+  })
+
+  classes.value = Array.isArray(res) ? (res as any[]) : []
+}
+
+/* ---------- FORM HANDLERS (PROGRAM DEAN) ---------- */
+
+function openCreate() {
+  if (isGenEdDean.value) return
+  selected.value = null
+  formModal.value = true
+}
+
+function openEdit(row: any) {
+  if (isGenEdDean.value) return
+  if (row.department_id !== deanDepartmentId.value) {
+    showAlert("error", "You can only edit classes in your own department.")
     return
   }
 
-  if (!form.value.academic_term_id) {
-    showAlert("error", "Academic term is required.")
-    return
+  const payload: ClassFormPayload = {
+    id: row.id,
+    class_name: row.class_name,
+    program_name: row.program_name,
+    year_level_number: row.year_level_number,
+    section: row.section,
+    adviser_id: row.adviser_id || null,
+    remarks: row.remarks || "",
+    academic_term_id: row.academic_term_id
   }
 
-  // Option C: detect "rename" (changes that affect logical class name)
-  let renameMode: "CASCADE" | "LOCAL" | undefined = undefined
-  if (form.value.id && editingOriginal.value) {
-    const yearChanged =
-      form.value.year_level_number !== editingOriginal.value.year_level_number
-    const sectionChanged =
-      (form.value.section || "").trim() !==
-      (editingOriginal.value.section || "").trim()
+  selected.value = payload
+  formModal.value = true
+}
 
-    if (yearChanged || sectionChanged) {
-      const cascade = window.confirm(
-        "Renaming affects related curriculum and schedules. Apply rename system-wide?\n\nOK = Rename everywhere\nCancel = Update this class only"
-      )
-      renameMode = cascade ? "CASCADE" : "LOCAL"
-      // (Note: in this schema, name is stored only in classes; mode is for future history/audit use.)
-    }
+async function handleSave(payload: ClassFormPayload) {
+  if (!deanDepartmentId.value || !deanUserId.value) {
+    showAlert("error", "Dean context not loaded.")
+    return
   }
 
   saving.value = true
 
-  const body = {
-    id: form.value.id,
+  const body: any = {
+    ...payload,
     department_id: deanDepartmentId.value,
-    year_level_number: form.value.year_level_number,
-    section: form.value.section.trim(),
-    academic_term_id: form.value.academic_term_id,
-    adviser_id: form.value.adviser_id,
-    remarks: form.value.remarks || null,
-    is_archived: !!form.value.is_archived,
-    rename_mode: renameMode
+    created_by: deanUserId.value
   }
 
-  const isUpdate = !!form.value.id
-  const endpoint = isUpdate ? "/api/classes/update" : "/api/classes/create"
-  const method = isUpdate ? "PUT" : "POST"
-
-  const res = await $fetch<any>(endpoint, {
-    method,
-    body
-  })
-
-  saving.value = false
-
-  if (res?.error) {
-    showAlert("error", res.error)
-    return
-  }
-
-  const createdOrUpdated = res?.class
-  modal.value = false
-
-  // For new class → ask if we auto-assign subjects
-  if (!isUpdate && createdOrUpdated) {
-    const doAssign = window.confirm(
-      "Assign matching subjects now for this new class?"
-    )
-    if (doAssign) {
-      const assignRes = await $fetch<any>("/api/classes/assign-subjects", {
-        method: "POST",
-        body: { class_id: createdOrUpdated.id }
+  try {
+    if (payload.id) {
+      const res: any = await $fetch("/api/classes/update", {
+        method: "PUT",
+        body
       })
-
-      if (assignRes?.error) {
-        showAlert("error", assignRes.error)
-      } else {
-        const count = assignRes?.assignedCount ?? 0
-        const label = assignRes?.termLabel || "current term"
-        showAlert(
-          "success",
-          `${count} subjects automatically assigned (${label}).`
-        )
-      }
+      if (res?.error) throw new Error(res.error)
+      showAlert("success", "Class updated.")
     } else {
+      const res: any = await $fetch("/api/classes/create", {
+        method: "POST",
+        body
+      })
+      if (res?.error) throw new Error(res.error)
       showAlert("success", "Class created.")
     }
-  } else {
-    showAlert("success", "Class saved.")
-  }
 
-  await loadClasses()
-}
-
-/* --- LOADERS --- */
-async function loadDeanDepartment() {
-  const { data } = await $supabase.auth.getUser()
-  const user = data?.user
-  if (!user) return
-
-  const { data: userRow } = await $supabase
-    .from("users")
-    .select("department_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle()
-
-  deanDepartmentId.value = userRow?.department_id || ""
-
-  if (deanDepartmentId.value) {
-    const { data: dept } = await $supabase
-      .from("departments")
-      .select("type")
-      .eq("id", deanDepartmentId.value)
-      .maybeSingle()
-
-    isGenEdDean.value = dept?.type === "GENED"
+    selected.value = null
+    await loadClasses()
+  } catch (err: any) {
+    showAlert("error", err?.message || "Failed to save class.")
+  } finally {
+    saving.value = false
   }
 }
 
-async function loadAdvisers() {
-  if (!deanDepartmentId.value) return
+/* ---------- DELETE FLOW (PROGRAM DEAN) ---------- */
 
-  const { data, error } = await $supabase
-    .from("faculty")
-    .select("id, first_name, last_name")
-    .eq("department_id", deanDepartmentId.value)
-
-  if (error) {
-    showAlert("error", error.message)
+function requestDelete(row: any) {
+  if (isGenEdDean.value) return
+  if (row.department_id !== deanDepartmentId.value) {
+    showAlert("error", "You can only delete classes in your own department.")
     return
   }
 
-  advisers.value = data || []
+  pendingDelete.value = row
+  deleteDialog.value = true
 }
 
-async function loadAcademicTerms() {
-  const { data, error } = await $supabase.from("academic_terms").select("*")
-  if (error) {
-    showAlert("error", error.message)
-    return
+async function executeDelete() {
+  if (!pendingDelete.value) return
+  deleting.value = true
+
+  try {
+    const res: any = await $fetch("/api/classes/delete", {
+      method: "DELETE",
+      body: { id: pendingDelete.value.id }
+    })
+
+    if (res?.error) throw new Error(res.error)
+
+    showAlert("success", "Class deleted.")
+    deleteDialog.value = false
+    pendingDelete.value = null
+    await loadClasses()
+  } catch (err: any) {
+    showAlert("error", err?.message || "Failed to delete class.")
+  } finally {
+    deleting.value = false
   }
-  terms.value = data || []
 }
 
-async function loadClasses() {
-  if (!deanDepartmentId.value) return
+/* ---------- INIT ---------- */
 
-  const res = await $fetch<any>("/api/classes/list", {
-    query: { role: "DEAN", department_id: deanDepartmentId.value }
-  })
-
-  classes.value = Array.isArray(res) ? res : []
-}
-
-/* --- INIT --- */
 onMounted(async () => {
-  await loadDeanDepartment()
-  await loadAdvisers()
+  await loadDeanContext()
+  await loadDepartments()
   await loadAcademicTerms()
+  await loadFaculty()
   await loadClasses()
 })
 </script>

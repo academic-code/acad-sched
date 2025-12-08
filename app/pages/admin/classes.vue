@@ -19,6 +19,7 @@ import { ref, computed, onMounted } from "vue"
 import ClassTable from "~/components/ClassTable.vue"
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
+import { useRefreshRouter } from "~/composables/useRefreshRouter" // ✅ added
 import type { AcademicTerm, FacultyOption } from "../../../types/Class"
 
 definePageMeta({ layout: "admin" })
@@ -120,4 +121,14 @@ onMounted(async () => {
   await loadFaculty()
   await loadClasses()
 })
+
+/* ---------- 🔄 AUTO REFRESH (NO LOGIC CHANGES) ---------- */
+useRefreshRouter({
+  classes: loadClasses,
+  class_subjects: loadClasses,
+  departments: loadDepartments,
+  faculty: loadFaculty,
+  academic_terms: loadAcademicTerms
+})
+
 </script>

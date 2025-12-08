@@ -16,6 +16,7 @@
 import { ref, onMounted } from "vue"
 import SubjectTable from "~/components/SubjectTable.vue"
 import type { Subject } from "../../../types/Subject"
+import { useRefreshRouter } from "~/composables/useRefreshRouter" // ✅ added
 
 definePageMeta({ layout: "admin" })
 
@@ -47,4 +48,11 @@ onMounted(async () => {
   await loadDepartments()
   await loadSubjects()
 })
+
+/* 🔄 AUTO REFRESH */
+useRefreshRouter({
+  subjects: loadSubjects,
+  departments: loadDepartments
+})
+
 </script>

@@ -143,6 +143,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue"
+
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
+
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
 import type { DataTableHeader } from "vuetify"
@@ -367,5 +370,10 @@ async function toggleStatus(item: FacultyRow) {
 onMounted(async () => {
   await loadDeanDepartment()
   await loadFaculty()
+})
+
+/* ---------------------- 🔄 AUTO REFRESH ---------------------- */
+useRefreshRouter({
+  faculty: loadFaculty
 })
 </script>

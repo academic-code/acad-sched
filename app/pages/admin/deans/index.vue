@@ -142,6 +142,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue"
 import { useAlert } from "~/composables/useAlert"
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
 
 definePageMeta({ layout: "admin" })
 
@@ -154,7 +155,6 @@ const deleteDialog = ref(false)
 const loading = ref(false)
 const search = ref("")
 const isEditing = ref(false)
-
 const itemsPerPage = ref(10)
 const selected = ref(null)
 
@@ -179,8 +179,6 @@ const headers = [
 
 /* FILTER SEARCH */
 const filteredDeans = computed(() => {
-  if (!search.value) return deans.value
-
   return deans.value.filter(d =>
     d.users?.full_name?.toLowerCase().includes(search.value.toLowerCase()) ||
     d.users?.email?.toLowerCase().includes(search.value.toLowerCase())
@@ -204,23 +202,36 @@ async function loadDeans() {
     `)
 
   if (error) return showAlert("error", error.message)
-  deans.value = data
+
+  deans.value = data || []
 }
 
 async function loadDepartments() {
-  const { data } = await $supabase.from("departments").select("*")
-  departments.value = data || []
+  const { data, error } = await $supabase
+    .from("departments")
+    .select("*")
+    .order("name")
+
+  if (!error) departments.value = data || []
 }
 
-onMounted(() => {
-  loadDeans()
-  loadDepartments()
+/* INIT */
+onMounted(async () => {
+  await loadDepartments()
+  await loadDeans()
 })
 
-/* OPEN MODALS */
+/* 🔄 AUTO-REFRESH */
+useRefreshRouter({
+  deans: loadDeans,
+  users: loadDeans,
+  departments: loadDepartments
+})
+
+/* MODAL + CRUD */
 function openCreate() {
   isEditing.value = false
-  form.value = { id: null, full_name: "", email: "", department_id: "" }
+  form.value = { id: null, user_id: null, full_name: "", email: "", department_id: "" }
   modal.value = true
 }
 
@@ -236,42 +247,18 @@ function openEdit(item) {
   modal.value = true
 }
 
-/* SAVE */
 async function save() {
   loading.value = true
 
-  if (!form.value.full_name.trim()) {
-    loading.value = false
-    return showAlert("error", "Dean name is required.")
-  }
-
-  if (!isEditing.value && !form.value.email.trim()) {
-    loading.value = false
-    return showAlert("error", "Dean email is required.")
-  }
-
-  if (!form.value.department_id) {
-    loading.value = false
-    return showAlert("error", "Please select a department.")
-  }
-
-  // CREATE
   if (!isEditing.value) {
-    const res = await $fetch("/api/invite-dean", {
-      method: "POST",
-      body: form.value
-    })
-
+    const res = await $fetch("/api/invite-dean", { method: "POST", body: form.value })
     loading.value = false
-
     if (res.error) return showAlert("error", res.error)
-
     modal.value = false
     showAlert("success", "Dean invitation sent.")
-    return loadDeans()
+    return
   }
 
-  // UPDATE
   await $supabase.from("users").update({
     full_name: form.value.full_name,
     department_id: form.value.department_id
@@ -284,10 +271,8 @@ async function save() {
   loading.value = false
   modal.value = false
   showAlert("success", "Dean updated.")
-  loadDeans()
 }
 
-/* DELETE */
 function confirmDelete(item) {
   selected.value = item
   deleteDialog.value = true
@@ -295,7 +280,6 @@ function confirmDelete(item) {
 
 async function deleteDean() {
   loading.value = true
-
   await $fetch("/api/deans/delete", {
     method: "DELETE",
     body: {
@@ -304,14 +288,13 @@ async function deleteDean() {
       auth_user_id: selected.value.users?.auth_user_id
     }
   })
-
-  loading.value = false
   deleteDialog.value = false
-
+  loading.value = false
   showAlert("success", "Dean deleted.")
-  loadDeans()
 }
 </script>
+
+
 
 <style scoped>
 .v-data-table {

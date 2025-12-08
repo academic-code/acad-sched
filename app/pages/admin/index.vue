@@ -99,7 +99,7 @@
         </v-card>
       </v-col>
 
-      <!-- CREATE DEAN (will use new modal system later) -->
+      <!-- CREATE DEAN -->
       <v-col cols="12" sm="6" md="4">
         <v-card
           elevation="1"
@@ -128,6 +128,7 @@
 <script setup>
 import { ref, onMounted } from "vue"
 import { useRouter } from "vue-router"
+import { useRefreshRouter } from "~/composables/useRefreshRouter" // ✅ added
 
 const router = useRouter()
 const { $supabase } = useNuxtApp()
@@ -155,7 +156,7 @@ const row2 = ref([
 ])
 
 /* --------------------------
-   FETCH COUNTS FROM SUPABASE
+   FETCH COUNTS
 -------------------------- */
 async function loadCounts() {
   loading.value = true
@@ -174,6 +175,17 @@ async function loadCounts() {
 }
 
 onMounted(loadCounts)
+
+/* 🔄 AUTO REFRESH */
+useRefreshRouter({
+  departments: loadCounts,
+  deans: loadCounts,
+  faculty: loadCounts,
+  subjects: loadCounts,
+  classes: loadCounts,
+  schedules: loadCounts
+})
+
 </script>
 
 <style scoped>

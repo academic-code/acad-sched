@@ -64,14 +64,18 @@
   </div>
 </template>
 
+
 <script setup>
 import { ref, onMounted } from "vue"
 import { useAlert } from "~/composables/useAlert"
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
 
 definePageMeta({ layout: "admin" })
 
-const { showAlert } = useAlert()
 const { $supabase } = useNuxtApp()
+const { showAlert } = useAlert()
+
+/* ---------------- STATE ---------------- */
 
 const loading = ref(false)
 const modal = ref(false)
@@ -79,7 +83,9 @@ const periods = ref([])
 
 const form = ref({ id: null, start_time: "", end_time: "", slot_index: "" })
 const isEditing = ref(false)
-let deleteTarget = ref(null)
+const deleteTarget = ref(null)
+
+/* ---------------- TABLE CONFIG ---------------- */
 
 const headers = [
   { title: "Slot", key: "slot_index" },
@@ -88,28 +94,61 @@ const headers = [
   { title: "Actions", key: "actions", sortable: false, align: "center" }
 ]
 
+/* ---------------- HELPERS ---------------- */
+
 function formatTime(time) {
   const [h, m] = time.split(":")
   const hour = Number(h)
   const suffix = hour >= 12 ? "PM" : "AM"
-  const adj = hour % 12 || 12
-  return `${adj}:${m} ${suffix}`
+  const adjusted = hour % 12 || 12
+  return `${adjusted}:${m} ${suffix}`
 }
 
-async function load() {
-  const { data } = await $supabase.from("periods").select("*").order("slot_index")
+/* ---------------- LOAD DATA ---------------- */
+
+async function loadPeriods() {
+  const { data, error } = await $supabase
+    .from("periods")
+    .select("*")
+    .order("slot_index")
+
+  if (error) return showAlert("error", error.message)
   periods.value = data || []
 }
 
+/* ---------------- RESET UI ON UPDATE (Option 2 behavior) ---------------- */
+
+function resetView() {
+  modal.value = false
+  deleteTarget.value = null
+  form.value = { id: null, start_time: "", end_time: "", slot_index: "" }
+}
+
+/* ---------------- REALTIME + AUTO REFRESH ---------------- */
+
+useRefreshRouter({
+  periods: async () => {
+    await loadPeriods()
+    resetView()
+  }
+})
+
+/* ---------------- CRUD ACTIONS ---------------- */
+
 async function generate(overwrite) {
   loading.value = true
-  const res = await $fetch("/api/periods/generate", { method: "POST", body: { overwrite } })
+
+  const res = await $fetch("/api/periods/generate", {
+    method: "POST",
+    body: { overwrite }
+  })
+
   loading.value = false
 
   if (res.error) return showAlert("error", res.error)
 
   showAlert("success", `${res.count} periods generated.`)
-  load()
+  await loadPeriods()
 }
 
 function openCreate() {
@@ -127,16 +166,38 @@ function openEdit(item) {
 async function save() {
   loading.value = true
 
-  const endpoint = isEditing.value ? "/api/periods/update" : "/api/periods/create"
+  const endpoint = isEditing.value
+    ? "/api/periods/update"
+    : "/api/periods/create"
 
-  const res = await $fetch(endpoint, { method: isEditing.value ? "PUT" : "POST", body: form.value })
+  const res = await $fetch(endpoint, {
+    method: isEditing.value ? "PUT" : "POST",
+    body: form.value
+  })
+
   loading.value = false
 
   if (res.error) return showAlert("error", res.error)
 
   modal.value = false
   showAlert("success", "Saved successfully.")
-  load()
+  await loadPeriods()
+}
+
+async function deletePeriod() {
+  if (!deleteTarget.value) return
+
+  loading.value = true
+
+  await $fetch("/api/periods/delete", {
+    method: "DELETE",
+    body: { id: deleteTarget.value.id }
+  })
+
+  loading.value = false
+
+  showAlert("success", "Period deleted.")
+  await loadPeriods()
 }
 
 function confirmDelete(item) {
@@ -144,14 +205,8 @@ function confirmDelete(item) {
   deletePeriod()
 }
 
-async function deletePeriod() {
-  loading.value = true
-  await $fetch("/api/periods/delete", { method:"DELETE", body:{ id: deleteTarget.value.id } })
-  loading.value = false
+/* ---------------- INIT ---------------- */
 
-  showAlert("success", "Period deleted.")
-  load()
-}
-
-onMounted(load)
+onMounted(loadPeriods)
 </script>
+

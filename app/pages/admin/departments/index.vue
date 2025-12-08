@@ -130,6 +130,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue"
 import { useAlert } from "~/composables/useAlert"
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
 
 definePageMeta({ layout: "admin" })
 
@@ -145,10 +146,10 @@ const loading = ref(false)
 const search = ref("")
 const isEditing = ref(false)
 
-const itemsPerPage = ref(10)
-
 const departments = ref([])
 const selected = ref(null)
+
+const itemsPerPage = ref(10)
 
 const form = ref({
   id: null,
@@ -193,10 +194,18 @@ async function loadDepartments() {
   departments.value = data || []
 }
 
+/* -----------------------
+   INIT
+----------------------- */
 onMounted(loadDepartments)
 
+/* 🔄 AUTO REFRESH — listen to changes */
+useRefreshRouter({
+  departments: loadDepartments
+})
+
 /* -----------------------
-   MODAL LOGIC
+   OPEN MODAL
 ----------------------- */
 function openCreate() {
   isEditing.value = false
@@ -211,7 +220,7 @@ function openEdit(item) {
 }
 
 /* -----------------------
-   NORMALIZE NAME
+   NORMALIZE KEY
 ----------------------- */
 function normalize(str) {
   return str
@@ -221,35 +230,31 @@ function normalize(str) {
 }
 
 /* -----------------------
-   SAVE (CREATE / UPDATE)
+   SAVE
 ----------------------- */
 async function save() {
   if (!form.value.name.trim()) {
-    showAlert("error", "Department name is required.")
-    return
+    return showAlert("error", "Department name is required.")
   }
 
   loading.value = true
 
   const normalized_key = normalize(form.value.name)
 
-  // CHECK DUPLICATE
+  // Check duplicate
   const { data: existing } = await $supabase
     .from("departments")
     .select("id, normalized_key")
 
-  const isDuplicate = existing?.some(d =>
-    d.normalized_key === normalized_key &&
-    d.id !== form.value.id
+  const isDuplicate = existing?.some(
+    d => d.normalized_key === normalized_key && d.id !== form.value.id
   )
 
   if (isDuplicate) {
     loading.value = false
-    showAlert("warning", "Department already exists!")
-    return
+    return showAlert("warning", "A department with this name already exists.")
   }
 
-  // CREATE
   if (!isEditing.value) {
     const { error } = await $supabase.from("departments").insert({
       name: form.value.name,
@@ -259,17 +264,12 @@ async function save() {
 
     loading.value = false
 
-    if (error) {
-      showAlert("error", error.message)
-      return
-    }
+    if (error) return showAlert("error", error.message)
 
     modal.value = false
-    showAlert("success", "Department created successfully!")
-    return loadDepartments()
+    return showAlert("success", "Department created!")
   }
 
-  // UPDATE
   const { error } = await $supabase
     .from("departments")
     .update({
@@ -281,14 +281,10 @@ async function save() {
 
   loading.value = false
 
-  if (error) {
-    showAlert("error", error.message)
-    return
-  }
+  if (error) return showAlert("error", error.message)
 
   modal.value = false
-  showAlert("success", "Department updated!")
-  loadDepartments()
+  showAlert("success", "Department updated.")
 }
 
 /* -----------------------
@@ -305,76 +301,18 @@ async function deleteDepartment() {
   loading.value = true
 
   try {
-    const deptId = selected.value.id
+    await $supabase.from("departments").delete().eq("id", selected.value.id)
 
-    // -----------------------------
-    // Fetch linked users BEFORE deleting DB records
-    // -----------------------------
-    const { data: linkedUsers } = await $supabase
-      .from("users")
-      .select("id, auth_user_id")
-      .eq("department_id", deptId)
-
-    const authIds = linkedUsers
-      ?.map(u => u.auth_user_id)
-      .filter(Boolean) || []
-
-    // -----------------------------
-    // 1) Delete schedules
-    // -----------------------------
-    await $supabase.from("schedules").delete().eq("department_id", deptId)
-
-    // -----------------------------
-    // 2) Delete classes
-    // -----------------------------
-    await $supabase.from("classes").delete().eq("department_id", deptId)
-
-    // -----------------------------
-    // 3) Delete subjects
-    // -----------------------------
-    await $supabase.from("subjects").delete().eq("department_id", deptId)
-
-    // -----------------------------
-    // 4) Delete faculty
-    // -----------------------------
-    await $supabase.from("faculty").delete().eq("department_id", deptId)
-
-    // -----------------------------
-    // 5) Delete user DB records
-    // -----------------------------
-    await $supabase.from("users").delete().eq("department_id", deptId)
-
-    // -----------------------------
-    // 6) Delete AUTH accounts (if any)
-    // -----------------------------
-    if (authIds.length > 0) {
-      for (const id of authIds) {
-        await $supabase.auth.admin.deleteUser(id)
-      }
-    }
-
-    // -----------------------------
-    // 7) Delete department itself
-    // -----------------------------
-    const { error } = await $supabase
-      .from("departments")
-      .delete()
-      .eq("id", deptId)
-
-    if (error) throw error
-
-    showAlert("success", "Department and all linked data (including login accounts) deleted.")
-
+    showAlert("success", "Department deleted.")
   } catch (err) {
     showAlert("error", err.message || "Failed to delete department.")
   }
 
   loading.value = false
   deleteDialog.value = false
-  loadDepartments()
 }
-
 </script>
+
 
 <style scoped>
 .v-data-table {

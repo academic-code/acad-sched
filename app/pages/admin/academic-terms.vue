@@ -148,6 +148,7 @@
 import { ref, computed, onMounted } from "vue"
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
 
 definePageMeta({ layout: "admin" })
 
@@ -164,6 +165,9 @@ interface AcademicTerm {
   is_active: boolean
 }
 
+/* ---------------------------------
+   STATE
+-----------------------------------*/
 const terms = ref<AcademicTerm[]>([])
 const search = ref("")
 const modal = ref(false)
@@ -181,12 +185,18 @@ const form = ref({
   is_active: false
 })
 
+/* ---------------------------------
+   OPTIONS
+-----------------------------------*/
 const semesterOptions = [
   { label: "1ST SEMESTER", value: "1ST" },
   { label: "2ND SEMESTER", value: "2ND" },
   { label: "SUMMER", value: "SUMMER" }
 ]
 
+/* ---------------------------------
+   TABLE HEADERS
+-----------------------------------*/
 const headers: any[] = [
   { title: "Academic Year", key: "academic_year" },
   { title: "Semester", key: "semester", align: "center" },
@@ -195,6 +205,9 @@ const headers: any[] = [
   { title: "Actions", key: "actions", align: "center" }
 ]
 
+/* ---------------------------------
+   COMPUTED
+-----------------------------------*/
 const filteredTerms = computed(() =>
   terms.value.filter(t =>
     t.academic_year.toLowerCase().includes(search.value.toLowerCase())
@@ -202,7 +215,6 @@ const filteredTerms = computed(() =>
 )
 
 const activeTerm = computed(() => terms.value.find(t => t.is_active))
-
 const isValid = computed(() => /^\d{4}-\d{4}$/.test(form.value.academic_year))
 
 const formatSemester = (s: TermSemester) =>
@@ -211,6 +223,9 @@ const formatSemester = (s: TermSemester) =>
 const formatLabel = (t: AcademicTerm) =>
   `${t.academic_year} • ${formatSemester(t.semester)}`
 
+/* ---------------------------------
+   LOAD FUNCTION
+-----------------------------------*/
 async function loadTerms() {
   const { data, error } = await $supabase
     .from("academic_terms")
@@ -218,14 +233,34 @@ async function loadTerms() {
     .order("academic_year", { ascending: true })
     .order("semester", { ascending: true })
 
-  if (error) {
-    showAlert("error", error.message)
-    return
-  }
+  if (error) return showAlert("error", error.message)
 
   terms.value = data || []
 }
 
+/* ---------------------------------
+   UI RESET (Realtime Refresh Behavior A)
+-----------------------------------*/
+function resetView() {
+  modal.value = false
+  confirmModal.value = false
+  search.value = ""
+  form.value = { id: null, academic_year: "", semester: "1ST", is_active: false }
+}
+
+/* ---------------------------------
+   🔄 AUTO REFRESH LISTENER
+-----------------------------------*/
+useRefreshRouter({
+  academic_terms: async () => {
+    await loadTerms()
+    resetView()
+  }
+})
+
+/* ---------------------------------
+   CRUD HANDLERS
+-----------------------------------*/
 function openCreate() {
   form.value = { id: null, academic_year: "", semester: "1ST", is_active: false }
   modal.value = true
@@ -244,7 +279,12 @@ function suggestNextTerm() {
   const last = terms.value.at(-1)
   if (!last) {
     const year = new Date().getFullYear()
-    form.value = { id: null, academic_year: `${year}-${year + 1}`, semester: "1ST", is_active: false }
+    form.value = {
+      id: null,
+      academic_year: `${year}-${year + 1}`,
+      semester: "1ST",
+      is_active: false
+    }
     modal.value = true
     return
   }
@@ -253,17 +293,20 @@ function suggestNextTerm() {
     last.semester === "1ST" ? "2ND" :
     last.semester === "2ND" ? "SUMMER" : "1ST"
 
- const [startStr = "0"] = last.academic_year?.split("-") || []
-const yearNum = Number(startStr) || new Date().getFullYear()
+  const [startStr = "0"] = last.academic_year?.split("-") || []
+  const yearNum = Number(startStr) || new Date().getFullYear()
 
-const nextYear =
-  nextSem === "1ST"
-    ? `${yearNum + 1}-${yearNum + 2}`
-    : last.academic_year
+  const nextYear =
+    nextSem === "1ST"
+      ? `${yearNum + 1}-${yearNum + 2}`
+      : last.academic_year
 
-
-
-  form.value = { id: null, academic_year: nextYear, semester: nextSem, is_active: false }
+  form.value = {
+    id: null,
+    academic_year: nextYear,
+    semester: nextSem,
+    is_active: false
+  }
   modal.value = true
 }
 
@@ -273,7 +316,6 @@ async function save() {
 
   saving.value = true
 
-  // enforce exactly one active term
   if (form.value.is_active && activeTerm.value && activeTerm.value.id !== form.value.id) {
     saving.value = false
     return showAlert("error", "There is already an active term. Deactivate it first.")
@@ -306,7 +348,6 @@ async function save() {
   modal.value = false
   await loadTerms()
 }
-
 
 async function toggleActive(term: AcademicTerm, value: boolean | null) {
   const newState = Boolean(value)
@@ -347,8 +388,10 @@ async function executeConfirm() {
   if (confirmCallback) await confirmCallback()
 }
 
+/* INIT */
 onMounted(loadTerms)
 </script>
+
 
 <style scoped>
 .active-row {

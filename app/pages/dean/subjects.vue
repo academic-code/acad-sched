@@ -65,6 +65,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
+
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
+
 import SubjectTable from "~/components/SubjectTable.vue"
 import SubjectForm from "~/components/SubjectForm.vue"
 import AppAlert from "~/components/AppAlert.vue"
@@ -319,5 +322,11 @@ onMounted(async () => {
   await loadDeanContext()
   await loadDepartments()
   await loadSubjects()
+})
+
+/* ---------------------- 🔄 AUTO REFRESH ---------------------- */
+useRefreshRouter({
+  subjects: loadSubjects,
+  departments: loadDepartments
 })
 </script>

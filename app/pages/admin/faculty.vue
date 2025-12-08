@@ -68,6 +68,7 @@
 definePageMeta({ layout: "admin" })
 
 import { ref, onMounted, computed } from "vue"
+import { useRefreshRouter } from "~/composables/useRefreshRouter"  // ✅ added
 
 const supabase = useNuxtApp().$supabase
 
@@ -136,6 +137,13 @@ onMounted(() => {
   loadDepartments()
   loadFaculty()
 })
+
+/* 🔄 AUTO REFRESH — no behavior change, just live sync */
+useRefreshRouter({
+  faculty: loadFaculty,
+  departments: loadDepartments
+})
+
 </script>
 
 <style scoped>

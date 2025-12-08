@@ -215,6 +215,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, type Ref } from "vue"
+
+import { useRefreshRouter } from "~/composables/useRefreshRouter" 
+
 import ClassTable from "~/components/ClassTable.vue"
 import ClassForm from "~/components/ClassForm.vue"
 import AppAlert from "~/components/AppAlert.vue"
@@ -534,5 +537,14 @@ onMounted(async () => {
   await loadAcademicTerms()
   await loadFaculty()
   await loadClasses()
+})
+
+/* ---------------------- 🔄 AUTO REFRESH ---------------------- */
+useRefreshRouter({
+  classes: loadClasses,
+  faculty: loadFaculty,
+  subjects: loadSubjects,
+  academic_terms: loadAcademicTerms,
+  class_subjects: loadSubjects
 })
 </script>

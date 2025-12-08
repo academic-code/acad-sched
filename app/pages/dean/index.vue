@@ -67,6 +67,9 @@
 definePageMeta({ layout: "dean" })
 
 import { ref, onMounted, onBeforeUnmount } from "vue"
+
+import { useRefreshRouter } from "~/composables/useRefreshRouter"
+
 import AppAlert from "~/components/AppAlert.vue"
 import { useAlert } from "~/composables/useAlert"
 
@@ -176,24 +179,24 @@ async function loadCounts() {
 /* -------------------------------------------------------------------
    REALTIME UPDATES
 ------------------------------------------------------------------- */
-function enableRealtime() {
-  subscriptions.forEach(sub => supabase.removeChannel(sub))
+// function enableRealtime() {
+//   subscriptions.forEach(sub => supabase.removeChannel(sub))
 
-  const tables = ["subjects"]
+//   const tables = ["subjects"]
 
-  if (!isGenEdDean.value) {
-    tables.push("faculty", "classes")
-  }
+//   if (!isGenEdDean.value) {
+//     tables.push("faculty", "classes")
+//   }
 
-  tables.forEach(table => {
-    const channel = supabase
-      .channel(`realtime-${table}`)
-      .on("postgres_changes", { event: "*", schema: "public", table }, () => loadCounts())
-      .subscribe()
+//   tables.forEach(table => {
+//     const channel = supabase
+//       .channel(`realtime-${table}`)
+//       .on("postgres_changes", { event: "*", schema: "public", table }, () => loadCounts())
+//       .subscribe()
 
-    subscriptions.push(channel)
-  })
-}
+//     subscriptions.push(channel)
+//   })
+// }
 
 /* -------------------------------------------------------------------
    LIFECYCLE
@@ -204,8 +207,15 @@ onMounted(async () => {
   enableRealtime()
 })
 
-onBeforeUnmount(() => {
-  subscriptions.forEach(sub => supabase.removeChannel(sub))
+// onBeforeUnmount(() => {
+//   subscriptions.forEach(sub => supabase.removeChannel(sub))
+// })
+
+/* ---------------------- 🔄 AUTO REFRESH ---------------------- */
+useRefreshRouter({
+  faculty: loadCounts,
+  classes: loadCounts,
+  subjects: loadCounts
 })
 </script>
 

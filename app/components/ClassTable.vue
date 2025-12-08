@@ -22,14 +22,29 @@
         style="max-width: 250px"
       />
 
-      <v-btn
-        v-if="canCreate"
-        color="primary"
-        prepend-icon="mdi-plus"
-        @click="$emit('create')"
-      >
-        Add Class
-      </v-btn>
+      <!-- Academic Term Filter -->
+<v-select
+  v-model="selectedTerm"
+  :items="termOptions"
+  label="Academic Term"
+  variant="outlined"
+  density="comfortable"
+  hide-details
+  style="max-width: 250px"
+  class="ml-3"
+/>
+
+
+<v-btn
+  v-if="props.role === 'DEAN'"
+  :disabled="!canCreate"
+  color="primary"
+  prepend-icon="mdi-plus"
+  @click="$emit('create')"
+>
+  {{ canCreate ? "Add Class" : "Term Locked" }}
+</v-btn>
+
     </div>
 
     <!-- Grouped List -->
@@ -58,25 +73,60 @@
               <td>{{ cls.term_label }}</td>
 
               <td class="text-center">
-                <v-btn
-                  v-if="canEdit"
-                  variant="text"
-                  icon
-                  size="small"
-                  @click="$emit('edit', cls)"
-                ><v-icon>mdi-pencil</v-icon></v-btn>
 
-                <v-btn
-                  v-if="canDelete"
-                  variant="text"
-                  icon
-                  size="small"
-                  color="red"
-                  @click="$emit('delete', cls)"
-                ><v-icon>mdi-delete</v-icon></v-btn>
+  <!-- ✏️ EDIT BUTTON BEHAVIOR -->
+  <template v-if="canEdit">
+    <!-- If allowed → normal edit button -->
+    <v-btn
+      v-if="canEdit(cls)"
+      variant="text"
+      icon
+      size="small"
+      @click="$emit('edit', cls)"
+    >
+      <v-icon>mdi-pencil</v-icon>
+    </v-btn>
 
-                <span v-if="!canEdit && !canDelete" class="text-grey text-caption">—</span>
-              </td>
+    <!-- If locked → disabled button with tooltip -->
+    <v-tooltip v-else text="Editing locked — academic term is inactive">
+      <template #activator="{ props }">
+        <v-btn v-bind="props" :disabled="true" icon size="small">
+          <v-icon>mdi-lock</v-icon>
+        </v-btn>
+      </template>
+    </v-tooltip>
+  </template>
+
+
+  <!-- 🗑 DELETE BUTTON -->
+  <template v-if="canDelete">
+    <!-- Allowed → normal delete -->
+    <v-btn
+      v-if="canDelete(cls)"
+      variant="text"
+      icon
+      size="small"
+      color="red"
+      @click="$emit('delete', cls)"
+    >
+      <v-icon>mdi-delete</v-icon>
+    </v-btn>
+
+    <!-- Locked → disabled delete -->
+    <v-tooltip v-else text="Cannot delete — academic term is inactive">
+      <template #activator="{ props }">
+        <v-btn v-bind="props" :disabled="true" icon size="small" color="red">
+          <v-icon>mdi-lock</v-icon>
+        </v-btn>
+      </template>
+    </v-tooltip>
+  </template>
+
+  <!-- For roles that cannot modify -->
+  <span v-if="!canEdit && !canDelete" class="text-grey text-caption">—</span>
+
+</td>
+
             </tr>
           </tbody>
         </v-table>
@@ -85,23 +135,57 @@
   </div>
 </template>
 
+
 <script setup>
-import { ref, computed } from "vue"
+import { ref, computed, watch, onMounted } from "vue"
 
 const props = defineProps({
   classes: Array,
   role: String, // ADMIN | GENED | DEAN
   departments: Array,
+  academicTerms: Array,
 })
 
 const search = ref("")
 const selectedDept = ref(null)
+const selectedTerm = ref(null)
 
+/* ------------------------------------------------------
+   AUTO-SELECT ACTIVE TERM ON LOAD
+------------------------------------------------------ */
+onMounted(() => {
+  const active = props.academicTerms?.find(t => t.is_active)
+  if (active) selectedTerm.value = active.id
+})
+
+/* ----------- Permissions ----------- */
 const showDeptFilter = computed(() => props.role !== "DEAN")
-const canCreate = computed(() => props.role === "DEAN")
-const canEdit = computed(() => props.role === "DEAN")
-const canDelete = computed(() => props.role === "DEAN")
 
+/**
+ * ADD BUTTON ENABLE LOGIC
+ * ✔ Only DEANs can create
+ * ✔ Enabled only if selectedTerm is active
+ */
+const canCreate = computed(() => {
+  if (props.role !== "DEAN") return false
+  const term = props.academicTerms.find(t => t.id === selectedTerm.value)
+  return term?.is_active === true
+})
+
+/* ----------- Edit/Delete Permissions (same rule) ----------- */
+const activeTerm = computed(() => props.academicTerms?.find(t => t.is_active) || null)
+
+const canEdit = (cls) => {
+  if (props.role !== "DEAN") return false
+  return cls.academic_term_id === activeTerm.value?.id
+}
+
+const canDelete = (cls) => {
+  if (props.role !== "DEAN") return false
+  return cls.academic_term_id === activeTerm.value?.id
+}
+
+/* ----------- Dropdown Options ----------- */
 const departmentOptions = computed(() => [
   { title: "All", value: null },
   ...(props.departments || []).map(d => ({
@@ -110,6 +194,14 @@ const departmentOptions = computed(() => [
   })),
 ])
 
+const termOptions = computed(() =>
+  (props.academicTerms || []).map(t => ({
+    title: `${t.academic_year} - ${t.semester}${t.is_active ? "  ⭐" : ""}`,
+    value: t.id,
+  }))
+)
+
+/* ----------- Filtering Logic ----------- */
 const filtered = computed(() => {
   let data = [...(props.classes || [])]
 
@@ -117,17 +209,22 @@ const filtered = computed(() => {
     data = data.filter(c => c.department_id === selectedDept.value)
   }
 
+  if (selectedTerm.value) {
+    data = data.filter(c => c.academic_term_id === selectedTerm.value)
+  }
+
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     data = data.filter(c =>
       c.class_name.toLowerCase().includes(q) ||
-      c.program_name.toLowerCase().includes(q),
+      c.program_name.toLowerCase().includes(q)
     )
   }
 
   return data
 })
 
+/* ----------- Grouping logic ----------- */
 const grouped = computed(() => {
   const map = {}
 
@@ -138,7 +235,7 @@ const grouped = computed(() => {
   }
 
   Object.values(map).forEach(list =>
-    list.sort((a, b) => a.section.localeCompare(b.section)),
+    list.sort((a, b) => a.section.localeCompare(b.section))
   )
 
   return map

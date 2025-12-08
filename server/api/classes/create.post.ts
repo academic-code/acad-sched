@@ -31,6 +31,18 @@ export default defineEventHandler(async (event) => {
   if (!class_name_raw || !class_name_raw.trim()) return { error: "Class name is required." }
   if (!academic_term_id) return { error: "Academic term is required." }
 
+  // ---- Prevent creating class in inactive academic term ----
+const { data: term } = await supabase
+  .from("academic_terms")
+  .select("is_active")
+  .eq("id", academic_term_id)
+  .maybeSingle()
+
+if (!term?.is_active) {
+  return { error: "Cannot create a class under an inactive academic term." }
+}
+
+
   const program_name = program_name_raw.trim()
   const section = section_raw.trim().toUpperCase()
   const class_name = class_name_raw.trim()

@@ -2,9 +2,28 @@
   <v-dialog v-model="model" width="800">
     <v-card class="pa-4">
 
-      <h3 class="text-h6 font-weight-medium mb-4">
-        {{ local.id ? "Edit Class" : "Create Class" }}
-      </h3>
+      <!-- Title + Lock Status -->
+      <div class="d-flex justify-space-between align-center mb-4">
+        <h3 class="text-h6 font-weight-medium">
+          {{ local.id ? "Edit Class" : "Create Class" }}
+        </h3>
+
+        <v-chip v-if="isLocked" color="red" variant="flat" size="small">
+          🔒 Locked — Term Inactive
+        </v-chip>
+      </div>
+
+      <!-- Lock warning -->
+      <v-alert
+        v-if="isLocked"
+        type="warning"
+        border="start"
+        variant="tonal"
+        class="mb-4"
+      >
+        This class is tied to an inactive academic term. Editing is disabled,
+        but you can still view the details.
+      </v-alert>
 
       <!-- Academic Term -->
       <v-select
@@ -16,16 +35,17 @@
         variant="outlined"
         density="comfortable"
         class="mb-3"
-        :disabled="!editing"
+        :disabled="true"
       />
 
-      <!-- Class Name (Manual Input) -->
+      <!-- Class Name -->
       <v-text-field
         v-model="local.class_name"
         label="Class Name (Manual Input)"
         variant="outlined"
         density="comfortable"
         class="mb-3"
+        :disabled="isLocked"
       />
 
       <!-- Program Name -->
@@ -35,6 +55,7 @@
         variant="outlined"
         density="comfortable"
         class="mb-3"
+        :disabled="isLocked"
       />
 
       <!-- Year Level & Section -->
@@ -48,6 +69,7 @@
             label="Year Level"
             variant="outlined"
             density="comfortable"
+            :disabled="isLocked"
           />
         </v-col>
 
@@ -58,6 +80,7 @@
             label="Section"
             variant="outlined"
             density="comfortable"
+            :disabled="isLocked"
           />
         </v-col>
       </v-row>
@@ -72,6 +95,7 @@
         variant="outlined"
         density="comfortable"
         class="mt-3"
+        :disabled="isLocked"
       />
 
       <!-- Remarks -->
@@ -82,12 +106,15 @@
         density="comfortable"
         rows="2"
         class="mt-2"
+        :disabled="isLocked"
       />
 
       <!-- Actions -->
       <div class="d-flex justify-end mt-4">
-        <v-btn variant="text" @click="close">Cancel</v-btn>
+        <v-btn variant="text" @click="close">Close</v-btn>
+
         <v-btn
+          v-if="!isLocked"
           :disabled="!isValid"
           :loading="saving"
           color="primary"
@@ -100,6 +127,7 @@
     </v-card>
   </v-dialog>
 </template>
+
 
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
@@ -197,6 +225,13 @@ watch(
     }
   }
 )
+
+const isLocked = computed(() => {
+  if (!local.value.academic_term_id) return false
+  const term = props.academicTerms.find(t => t.id === local.value.academic_term_id)
+  return term && !term.is_active
+})
+
 
 /* ----------------------- VALIDATION ----------------------- */
 const isValid = computed(() =>

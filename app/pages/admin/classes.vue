@@ -2,11 +2,13 @@
   <div>
     <h1 class="text-h5 font-weight-bold mb-6">Classes</h1>
 
-    <ClassTable
-      :classes="classesForTable"
-      :departments="departments"
-      role="ADMIN"
-    />
+ <ClassTable
+  :classes="classesForTable"
+  :departments="departments"
+  :academic-terms="academicTerms"
+  role="ADMIN"
+/>
+
 
     <AppAlert />
   </div>

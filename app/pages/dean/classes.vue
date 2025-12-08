@@ -45,11 +45,13 @@
     <ClassTable
       :classes="classesForTable"
       :departments="departments"
+      :academic-terms="academicTerms"
       :role="isGenEdDean ? 'GENED' : 'DEAN'"
       @create="openCreate"
       @edit="openEdit"
       @delete="requestDelete"
     />
+
 
     <AppAlert />
   </div>

@@ -72,60 +72,87 @@
               <td>{{ cls.adviser_name || "-" }}</td>
               <td>{{ cls.term_label }}</td>
 
-              <td class="text-center">
+<td class="text-center">
 
-  <!-- ✏️ EDIT BUTTON BEHAVIOR -->
-  <template v-if="canEdit">
-    <!-- If allowed → normal edit button -->
+  <!-- 📘 ASSIGN SUBJECTS BUTTON -->
+  <template v-if="props.role === 'DEAN'">
+    <!-- Enabled only when editor is allowed -->
     <v-btn
       v-if="canEdit(cls)"
       variant="text"
       icon
       size="small"
-      @click="$emit('edit', cls)"
+      color="blue-darken-1"
+      @click="$emit('assign', cls)"
     >
-      <v-icon>mdi-pencil</v-icon>
+      <v-icon>mdi-book-plus</v-icon>
     </v-btn>
 
-    <!-- If locked → disabled button with tooltip -->
-    <v-tooltip v-else text="Editing locked — academic term is inactive">
+    <!-- Disabled if locked -->
+    <v-tooltip v-else text="Cannot assign — term inactive">
       <template #activator="{ props }">
-        <v-btn v-bind="props" :disabled="true" icon size="small">
+        <v-btn v-bind="props" disabled icon size="small">
           <v-icon>mdi-lock</v-icon>
         </v-btn>
       </template>
     </v-tooltip>
   </template>
 
+  <!-- Read-Only mode for: ADMIN & GENED Dean -->
+  <template v-if="props.role !== 'DEAN'">
+    <v-tooltip text="View assigned subjects">
+      <template #activator="{ props }">
+        <v-btn v-bind="props" icon size="small" @click="$emit('assign', cls)">
+          <v-icon>mdi-eye</v-icon>
+        </v-btn>
+      </template>
+    </v-tooltip>
+  </template>
+
+  <!-- ✏️ EDIT BUTTON -->
+  <v-btn
+    v-if="props.role === 'DEAN' && canEdit(cls)"
+    variant="text"
+    icon
+    size="small"
+    @click="$emit('edit', cls)"
+  >
+    <v-icon>mdi-pencil</v-icon>
+  </v-btn>
+
+  <v-tooltip v-else-if="props.role === 'DEAN'" text="Editing locked — term inactive">
+    <template #activator="{ props }">
+      <v-btn v-bind="props" disabled icon size="small">
+        <v-icon>mdi-lock</v-icon>
+      </v-btn>
+    </template>
+  </v-tooltip>
 
   <!-- 🗑 DELETE BUTTON -->
-  <template v-if="canDelete">
-    <!-- Allowed → normal delete -->
-    <v-btn
-      v-if="canDelete(cls)"
-      variant="text"
-      icon
-      size="small"
-      color="red"
-      @click="$emit('delete', cls)"
-    >
-      <v-icon>mdi-delete</v-icon>
-    </v-btn>
+  <v-btn
+    v-if="props.role === 'DEAN' && canDelete(cls)"
+    variant="text"
+    icon
+    size="small"
+    color="red"
+    @click="$emit('delete', cls)"
+  >
+    <v-icon>mdi-delete</v-icon>
+  </v-btn>
 
-    <!-- Locked → disabled delete -->
-    <v-tooltip v-else text="Cannot delete — academic term is inactive">
-      <template #activator="{ props }">
-        <v-btn v-bind="props" :disabled="true" icon size="small" color="red">
-          <v-icon>mdi-lock</v-icon>
-        </v-btn>
-      </template>
-    </v-tooltip>
-  </template>
+  <v-tooltip v-else-if="props.role === 'DEAN'" text="Cannot delete — term inactive">
+    <template #activator="{ props }">
+      <v-btn v-bind="props" disabled icon size="small" color="red">
+        <v-icon>mdi-lock</v-icon>
+      </v-btn>
+    </template>
+  </v-tooltip>
 
-  <!-- For roles that cannot modify -->
-  <span v-if="!canEdit && !canDelete" class="text-grey text-caption">—</span>
+  <!-- If role cannot do anything -->
+  <span v-if="props.role !== 'DEAN'" class="text-grey text-caption">—</span>
 
 </td>
+
 
             </tr>
           </tbody>

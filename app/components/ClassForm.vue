@@ -102,7 +102,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
-import type { AcademicTerm, FacultyOption, ClassFormPayload } from "../../types/Class"
+
+import type { ClassFormPayload, FacultyOption } from "../../types/Class"
+import type { AcademicTerm } from "../../types/AcademicTerm"
 
 const props = defineProps<{
   modelValue: boolean
@@ -111,6 +113,7 @@ const props = defineProps<{
   faculty: FacultyOption[]
   saving?: boolean
 }>()
+
 
 const emit = defineEmits<{
   (e: "update:modelValue", v: boolean): void
@@ -157,17 +160,29 @@ const local = ref<ClassFormPayload>({
 })
 
 /* ----------------------- LOAD DATA ----------------------- */
+const editing = ref(false)
+
 watch(
   () => props.data,
   (val) => {
     if (val) {
+      // Edit mode
+      editing.value = true
       local.value = { ...val }
     } else {
+      // Create mode — auto-select active term
+      editing.value = false
       resetForm()
+
+      const activeTerm = props.academicTerms?.find(t => t.is_active)
+      if (activeTerm) {
+        local.value.academic_term_id = activeTerm.id
+      }
     }
   },
   { immediate: true }
 )
+
 
 /* ----------------------- VALIDATION ----------------------- */
 const isValid = computed(() =>

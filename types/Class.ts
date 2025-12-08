@@ -2,11 +2,8 @@
 
 export type SemesterType = "1ST" | "2ND" | "SUMMER"
 
-export interface AcademicTerm {
-  id: string
-  academic_year: string
-  semester: SemesterType
-}
+// Use the REAL AcademicTerm definition
+export type { AcademicTerm } from "./AcademicTerm"
 
 export interface FacultyOption {
   id: string

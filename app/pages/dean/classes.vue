@@ -167,7 +167,7 @@ async function loadDepartments() {
 async function loadAcademicTerms() {
   const { data, error } = await $supabase
     .from("academic_terms")
-    .select("id, academic_year, semester")
+    .select("id, academic_year, semester, is_active") // <-- FIXED
     .order("academic_year", { ascending: false })
     .order("semester", { ascending: false })
 
@@ -176,8 +176,9 @@ async function loadAcademicTerms() {
     return
   }
 
-  academicTerms.value = (data || []) as AcademicTerm[]
+  academicTerms.value = data as AcademicTerm[]
 }
+
 
 async function loadFaculty() {
   // GenEd dean is read-only, but for display they can see adviser names across departments

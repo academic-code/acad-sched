@@ -268,21 +268,37 @@ const nextYear =
 }
 
 async function save() {
-  if (!isValid.value) return showAlert("error", "Enter a valid academic year (YYYY-YYYY).")
+  if (!isValid.value)
+    return showAlert("error", "Enter a valid academic year (YYYY-YYYY).")
 
   saving.value = true
 
-  // --- RULE: Prevent setting active if another exists ---
+  // enforce exactly one active term
   if (form.value.is_active && activeTerm.value && activeTerm.value.id !== form.value.id) {
     saving.value = false
     return showAlert("error", "There is already an active term. Deactivate it first.")
   }
 
   if (form.value.id) {
-    await $supabase.from("academic_terms").update(form.value).eq("id", form.value.id)
+    await $supabase
+      .from("academic_terms")
+      .update({
+        academic_year: form.value.academic_year,
+        semester: form.value.semester,
+        label: `${form.value.academic_year} • ${form.value.semester}`,
+        is_active: form.value.is_active
+      })
+      .eq("id", form.value.id)
+
     showAlert("success", "Academic term updated.")
   } else {
-    await $supabase.from("academic_terms").insert(form.value)
+    await $supabase.from("academic_terms").insert({
+      academic_year: form.value.academic_year,
+      semester: form.value.semester,
+      label: `${form.value.academic_year} • ${form.value.semester}`,
+      is_active: form.value.is_active
+    })
+
     showAlert("success", "Academic term created.")
   }
 
@@ -290,6 +306,7 @@ async function save() {
   modal.value = false
   await loadTerms()
 }
+
 
 async function toggleActive(term: AcademicTerm, value: boolean | null) {
   const newState = Boolean(value)

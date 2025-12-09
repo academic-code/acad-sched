@@ -1,47 +1,121 @@
 // server/api/classes/list.get.ts
-import { getQuery } from "h3"
+import { getQuery, createError } from "h3"
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
-
   const query = getQuery(event)
 
-  const role = (query.role?.toString() || "DEAN").toUpperCase()
-  const departmentId = query.department_id?.toString() || ""
-  const academicTermId = query.academic_term_id?.toString() || ""
-  const includeArchived = query.include_archived === "true"
+  // ----------------------------------------------------------
+  // 1️⃣ Get Supabase session token from request headers
+  // ----------------------------------------------------------
+  const authHeader = event.node.req.headers.authorization
+  const token = authHeader?.replace("Bearer ", "") ?? null
 
-  let request = supabase.from("classes").select("*")
+  if (!token) {
+    throw createError({ statusCode: 401, message: "Missing auth token." })
+  }
 
-  // ----- ROLE-BASED FILTERING -----
-  if (role === "DEAN" && departmentId) {
-    // Program dean: only their department
-    request = request.eq("department_id", departmentId)
-  } else if (role === "ADMIN" || role === "GENED") {
-    // Admin + GenEd dean: can see all, optional department filter
-    if (departmentId) {
-      request = request.eq("department_id", departmentId)
+  const { data: authData, error: authError } = await supabase.auth.getUser(token)
+
+  if (authError || !authData?.user) {
+    throw createError({ statusCode: 401, message: "Unauthorized" })
+  }
+
+  const loggedInUser = authData.user
+
+  // ----------------------------------------------------------
+  // 2️⃣ Fetch role & department of logged-in user
+  // ----------------------------------------------------------
+  const { data: userRecord, error: roleError } = await supabase
+    .from("users")
+    .select("role, department_id")
+    .eq("auth_user_id", loggedInUser.id)
+    .maybeSingle()
+
+  if (roleError || !userRecord) {
+    throw createError({ statusCode: 403, message: "User role not found." })
+  }
+
+  let userRole = userRecord.role.toUpperCase()
+  const userDepartmentId = userRecord.department_id
+
+  // 🔍 Detect if user is actually a GENED dean
+  if (userRole === "DEAN" && userDepartmentId) {
+    const { data: dept } = await supabase
+      .from("departments")
+      .select("type")
+      .eq("id", userDepartmentId)
+      .maybeSingle()
+
+    if (dept?.type === "GENED") {
+      userRole = "GENED"
     }
   }
 
-  // Filter by academic term if provided
+  // ----------------------------------------------------------
+  // 3️⃣ Apply optional filters from UI
+  // ----------------------------------------------------------
+  const academicTermId = query.academic_term_id?.toString() || ""
+  const includeArchived = query.include_archived === "true"
+  const filterDepartmentId = query.department_id?.toString() || ""
+
+  // ----------------------------------------------------------
+  // 4️⃣ Base query
+  // ----------------------------------------------------------
+  let request = supabase.from("classes").select("*")
+
+  // ----------------------------------------------------------
+  // 5️⃣ Role-Based Visibility Logic
+  // ----------------------------------------------------------
+
+  if (userRole === "ADMIN") {
+    // Admin sees everything
+    if (filterDepartmentId) {
+      request = request.eq("department_id", filterDepartmentId)
+    }
+  }
+
+  else if (userRole === "GENED") {
+    // GenEd dean sees all departments (optional filter supported)
+    if (filterDepartmentId) {
+      request = request.eq("department_id", filterDepartmentId)
+    }
+  }
+
+  else if (userRole === "DEAN") {
+    // Regular dean sees only their own department
+    request = request.eq("department_id", userDepartmentId)
+  }
+
+  else if (userRole === "FACULTY") {
+    throw createError({ statusCode: 403, message: "Faculty cannot view classes." })
+  }
+
+  // ----------------------------------------------------------
+  // 6️⃣ Filter Academic Term
+  // ----------------------------------------------------------
   if (academicTermId) {
     request = request.eq("academic_term_id", academicTermId)
   }
 
-  // Exclude archived by default
+  // ----------------------------------------------------------
+  // 7️⃣ Hide archived by default
+  // ----------------------------------------------------------
   if (!includeArchived) {
     request = request.eq("is_archived", false)
   }
 
-  // Order: Year level ASC, then Section ASC, then Program name ASC
+  // ----------------------------------------------------------
+  // 8️⃣ Sort results
+  // ----------------------------------------------------------
   const { data, error } = await request
     .order("year_level_number", { ascending: true })
     .order("section", { ascending: true })
     .order("program_name", { ascending: true })
 
   if (error) {
-    return { error: error.message }
+    console.error(error)
+    throw createError({ statusCode: 500, message: error.message })
   }
 
   return data || []

@@ -155,46 +155,57 @@ async function loadDepartments() {
 
 /* ---------- LOAD SUBJECTS (BASED ON ROLE) ---------- */
 async function loadSubjects() {
-  if (!deanDepartmentId.value) return
+  const { data: { session } } = await $supabase.auth.getSession()
 
+  if (!session) return
+
+  // ---- GENED DEAN VIEW ----
   if (isGenEdDean.value) {
-    // GenEd dean: only GenEd subjects; read-only
     const res = await $fetch("/api/subjects/list", {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`
+      },
       query: { role: "GENED" }
     })
-    subjects.value = Array.isArray(res) ? (res as Subject[]) : []
+
+    subjects.value = Array.isArray(res) ? res : []
     return
   }
 
-  // PROGRAM DEAN:
-  // 1) All subjects in their department
+  // ---- PROGRAM DEAN VIEW ----
+
+  // 1️⃣ Department subjects
   const deptSubjects = await $fetch("/api/subjects/list", {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`
+    },
     query: {
       role: "DEAN",
       department_id: deanDepartmentId.value
     }
   })
 
-  // 2) All GenEd subjects (for visibility)
+  // 2️⃣ GenEd subjects
   const genedSubjects = await $fetch("/api/subjects/list", {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`
+    },
     query: {
       role: "GENED"
     }
   })
 
   const combined = [
-    ...(Array.isArray(deptSubjects) ? (deptSubjects as Subject[]) : []),
-    ...(Array.isArray(genedSubjects) ? (genedSubjects as Subject[]) : [])
+    ...(Array.isArray(deptSubjects) ? deptSubjects : []),
+    ...(Array.isArray(genedSubjects) ? genedSubjects : [])
   ]
 
-  const dedupMap = new Map<string, Subject>()
-  for (const s of combined) {
-    if (!s.id) continue
-    dedupMap.set(s.id, s)
-  }
-
-  subjects.value = Array.from(dedupMap.values())
+  subjects.value = Array.from(new Map(combined.map(s => [s.id, s])).values())
 }
+
+
+
+
 
 /* ---------- FORM HANDLERS (PROGRAM DEAN) ---------- */
 function openCreate() {

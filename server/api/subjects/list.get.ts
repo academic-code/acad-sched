@@ -1,37 +1,75 @@
-// server/api/subjects/list.get.ts
-import { getQuery } from "h3"
+import { getQuery, createError } from "h3"
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
-
   const query = getQuery(event)
-  const role = (query.role?.toString() || "ADMIN").toUpperCase()
-  const departmentId = query.department_id?.toString() || ""
-  const filterDept = query.filter_department_id?.toString() || ""
 
-  let request = supabase.from("subjects").select("*")
+  // ---- 1️⃣ AUTH ----
+  const authHeader = event.node.req.headers.authorization
+  const token = authHeader?.replace("Bearer ", "") ?? null
 
-  if (role === "DEAN" && departmentId) {
-    // Normal dean: ONLY their department’s subjects
-    request = request.eq("department_id", departmentId)
-  } else if (role === "GENED") {
-    // GenEd dean: only GenEd subjects, optional department filter
-    request = request.eq("is_gened", true)
-    if (filterDept) {
-      request = request.eq("department_id", filterDept)
-    }
-  } else {
-    // ADMIN (or anything else): optional department filter only
-    if (filterDept) {
-      request = request.eq("department_id", filterDept)
+  if (!token) {
+    throw createError({ statusCode: 401, message: "Missing auth token." })
+  }
+
+  const { data: authData } = await supabase.auth.getUser(token)
+  if (!authData?.user) {
+    throw createError({ statusCode: 401, message: "Unauthorized" })
+  }
+
+  // ---- 2️⃣ USER ROLE + DEPARTMENT ----
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("role, department_id")
+    .eq("auth_user_id", authData.user.id)
+    .maybeSingle()
+
+  if (!userRow) throw createError({ statusCode: 403, message: "User role not found." })
+
+  let userRole = userRow.role.toUpperCase()
+  const userDept = userRow.department_id
+
+  // Detect if the DEAN belongs to GENED department → promote to GENED role
+  if (userRole === "DEAN" && userDept) {
+    const { data: dept } = await supabase
+      .from("departments")
+      .select("type")
+      .eq("id", userDept)
+      .maybeSingle()
+
+    if (dept?.type === "GENED") {
+      userRole = "GENED"
     }
   }
 
+  // ---- 3️⃣ BUILD QUERY ----
+  let request = supabase.from("subjects").select("*")
+
+  if (userRole === "ADMIN") {
+    // sees everything
+  }
+
+  else if (userRole === "GENED") {
+    // Sees ONLY GenEd subjects from ANY department
+    request = request.eq("is_gened", true)
+  }
+
+  else if (userRole === "DEAN") {
+    // Sees ONLY subjects from their own department (Major + GenEd)
+    request = request.eq("department_id", userDept)
+  }
+
+  else {
+    throw createError({ statusCode: 403, message: "Forbidden." })
+  }
+
+  // ---- 4️⃣ SORT ----
   const { data, error } = await request
     .order("year_level_number", { ascending: true })
     .order("semester", { ascending: true })
     .order("course_code", { ascending: true })
 
-  if (error) return { error: error.message }
-  return data
+  if (error) throw createError({ statusCode: 500, message: error.message })
+
+  return data || []
 })

@@ -104,14 +104,18 @@ async function loadFaculty() {
 }
 
 async function loadClasses() {
+  const { data: { session } } = await $supabase.auth.getSession()
+
   const res = await $fetch("/api/classes/list", {
-    query: {
-      role: "ADMIN"
-    }
+    headers: {
+      Authorization: `Bearer ${session?.access_token}`
+    },
+    query: {} // role no longer needed
   })
 
-  classes.value = Array.isArray(res) ? (res as any[]) : []
+  classes.value = Array.isArray(res) ? res : []
 }
+
 
 /* ---------- INIT ---------- */
 

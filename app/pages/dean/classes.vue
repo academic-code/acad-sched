@@ -521,13 +521,19 @@ async function loadFaculty() {
       full_name: `${f.last_name}, ${f.first_name}`
     })) || []
 }
-
 async function loadClasses() {
+  const { data: { session } } = await $supabase.auth.getSession()
+
   const res = await $fetch("/api/classes/list", {
+    headers: {
+      Authorization: `Bearer ${session?.access_token}`
+    },
     query: { role: isGenEdDean.value ? "GENED" : "DEAN" }
   })
+
   classes.value = Array.isArray(res) ? res : []
 }
+
 
 /* ---------------------- INIT ---------------------- */
 

@@ -110,23 +110,25 @@
     />
 
     <!-- Drawer -->
-    <ScheduleDrawer
-      v-model="drawerOpen"
-      :role="'DEAN'"
-      :mode="drawerMode"
-      :payload="drawerPayload"
-      :classes="classes"
-      :subjects="subjects"
-      :class-subjects="classSubjects"
-      :faculty="faculty"
-      :periods="periods"
-      :rooms="rooms"
-      :days="days"
-      :lock-day="drawerLockDay"
-      :lock-time="drawerLockTime"
-     :current-term-semester="currentTermSemester"
-      @save="handleDrawerSave"
-    />
+<ScheduleDrawer
+  v-model="drawerOpen"
+  :role="'DEAN'"
+  :mode="drawerMode"
+  :payload="drawerPayload"
+  :classes="classes"
+  :subjects="subjects"
+  :class-subjects="classSubjects"
+  :faculty="faculty"
+  :periods="periods"
+  :rooms="rooms"
+  :days="days"
+  :lock-day="drawerLockDay"
+  :lock-time="drawerLockTime"
+  :current-term-id="selectedTermId"               
+  :current-term-semester="currentTermSemester"     
+  @save="handleDrawerSave"
+/>
+
 
     <!-- Snackbar (server messages + conflicts) -->
     <v-snackbar

@@ -231,18 +231,18 @@ const props = defineProps<{
   role?: Role
   mode: DrawerMode
   payload?: any | null
-  classes?: ClassItem[] | null
-  subjects?: SubjectItem[] | null
-  classSubjects?: { id: string; class_id: string; subject_id: string; academic_term_id: string }[] | null
-  faculty?: FacultyItem[] | null
-  periods?: PeriodItem[] | null
+  classes?: any[] | null
+  subjects?: any[] | null
+  classSubjects?: any[] | null
+  faculty?: any[] | null
+  periods?: any[] | null
   rooms?: any[] | null
-  days?: DayItem[] | null
+  days?: any[] | null
   lockDay?: boolean
   lockTime?: boolean
-  currentTermSemester?: string | number | null
-}>()
-
+  currentTermSemester?: string | null   // STRING: "1ST" | "2ND" | "SUMMER"
+  currentTermId?: string | null         // UUID — FIXED HERE
+}>();
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void
   (e: "save", payload: Record<string, any>): void
@@ -261,7 +261,7 @@ const local = ref({
   day: null as string | null,
   period_start_id: null as string | null,
   period_end_id: null as string | null,
-  academic_term_id: props.currentTermSemester ?? null
+  academic_term_id: props.currentTermId ?? null
 })
 
 const saving = ref(false)
@@ -289,7 +289,8 @@ const daysSafe = computed(() => props.days ?? [
 // UI helpers (named to avoid 'unknown' TS issues in templates)
 //
 const classLabel = (c: ClassItem) => `${c.class_name} ${c.year_level_label} - ${c.section}`
-const subjectLabel = (s: SubjectItem) => `${s.course_code} — ${s.description}`
+const subjectLabel = (s?: SubjectItem) =>
+  s ? `${s.course_code} — ${s.description}` : ""
 const facultyLabel = (f: any) => `${f.last_name}, ${f.first_name}`
 const periodLabel = (p: PeriodItem) => p.label ?? `${p.start_time ?? ""} - ${p.end_time ?? ""}`
 const dayLabel = (d: DayItem) => d.label
@@ -330,7 +331,7 @@ const filteredSubjects = computed(() => {
 
   // 2 — include additional subjects explicitly added in class_subjects
   const overrideIds = classSubjectsSafe.value
-    .filter(cs => cs.class_id === cls.id && cs.academic_term_id === props.currentTermSemester)
+    .filter(cs => cs.class_id === cls.id && cs.academic_term_id === props.currentTermId)
     .map(cs => cs.subject_id)
 
   const overrideSubs = subjectsSafe.value.filter(s => overrideIds.includes(s.id))
@@ -411,7 +412,7 @@ watch(
         day: preserved.day ?? null,
         period_start_id: preserved.start ?? null,
         period_end_id: preserved.end ?? null,
-        academic_term_id: props.currentTermSemester ?? null
+        academic_term_id: props.currentTermId ?? null
       }
       return
     }
@@ -441,7 +442,7 @@ watch(
       day: val.day ?? null,
       period_start_id: periodStartId ?? preserved.start ?? null,
       period_end_id: periodEndId ?? preserved.end ?? null,
-      academic_term_id: props.currentTermSemester ?? val.academic_term_id ?? null
+     academic_term_id: props.currentTermId ?? val.academic_term_id ?? null
     }
 
     // If create-range (no id) but preserved slot exists keep preserved

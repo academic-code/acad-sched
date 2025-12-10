@@ -65,7 +65,10 @@
             class="preview-event"
             :style="previewBlock.style"
           >
-            {{ dragMode === "MOVE" ? "Move..." : "New Schedule" }}
+            {{ dragMode === "MOVE" ? "Move:" : "New Time Schedule:" }}
+            {{ formatTime(periods[dragMin]?.start_time ?? "") }} - 
+            {{ formatTime(periods[dragMax]?.end_time ?? "") }}
+
           </div>
         </div>
       </div>
@@ -208,63 +211,78 @@ function dragMove(evt: MouseEvent) {
   if (!dragState.value) return
 
   const target = safeTarget(evt)
-  if (!target) return
-
-  const column = target.closest(".day-column") as HTMLElement | null
+  const column = target?.closest(".day-column") as HTMLElement | null
   if (!column) return
 
-  const clamped = Math.max(0, Math.min(getSlot(evt), props.periods.length - 1))
+  const height = getSlotHeight()
+  const slot = Math.floor((evt.clientY - column.getBoundingClientRect().top) / height)
+
+  const clamped = Math.max(0, Math.min(slot, props.periods.length - 1))
+
+  // Snap (prevent jitter)
+  if (clamped === dragMax.value) return
+
   dragMin.value = Math.min(dragState.value.startSlot, clamped)
   dragMax.value = Math.max(dragState.value.startSlot, clamped)
 
-  const height = getSlotHeight()
+  const conflict = hasConflict(dragState.value.day, dragMin.value, dragMax.value)
 
   previewBlock.value = {
-  style: {
-    position: "absolute",
-    top: `${dragMin.value * height}px`,
-    height: `${(dragMax.value - dragMin.value + 1) * height}px`,
-    left: "0px",
-    right: "0px",
-    pointerEvents: "none"
+    style: {
+      position: "absolute",
+      top: `${dragMin.value * height}px`,
+      height: `${(dragMax.value - dragMin.value + 1) * height}px`,
+      left: "0px",
+      right: "0px",
+      border: conflict ? "2px solid red" : "2px dashed #2196f3",
+      background: conflict ? "rgba(255,0,0,0.15)" : "rgba(33,150,243,0.15)",
+      pointerEvents: "none"
+    }
   }
 }
 
-}
+
 
 
 /* ---- Finish ---- */
 function finishDrag(_evt: MouseEvent) {
-  if (!dragState.value) {
+  if (!dragState.value || dragMin.value < 0 || dragMax.value < 0) {
     resetDrag()
     return
   }
 
+  const day = dragState.value.day ?? ""
   const startPeriod = props.periods[dragMin.value]
   const endPeriod = props.periods[dragMax.value]
 
-  if (!startPeriod || !endPeriod) {
+  // ✅ Conflict check HERE (inside function)
+  const conflict = hasConflict(day, dragMin.value, dragMax.value)
+  if (conflict) {
+    alert("❌ This time range conflicts with an existing schedule.")
     resetDrag()
     return
   }
 
   if (dragMode.value === "CREATE") {
     emit("create-range", {
-      day: dragState.value.day,
-      period_start_id: startPeriod.id,
-      period_end_id: endPeriod.id
+      day,
+      period_start_id: startPeriod?.id ?? "",
+      period_end_id: endPeriod?.id ?? ""
     })
   } else if (dragState.value.event) {
     emit("event-drop", {
       id: String(dragState.value.event.id),
-      day: dragState.value.day,
-      period_start_id: startPeriod.id,
-      period_end_id: endPeriod.id
+      day,
+      period_start_id: startPeriod?.id ?? "",
+      period_end_id: endPeriod?.id ?? ""
     })
   }
 
   resetDrag()
 }
+
+
+
 
 function resetDrag() {
   dragState.value = null
@@ -295,6 +313,13 @@ function eventStyle(ev: any): CSSProperties {
     cursor: "grab"
   }
 }
+
+function hasConflict(day: string, start: number, end: number) {
+  return (eventsByDay.value[day] ?? []).some(ev => {
+    return !(end < ev.startSlot || start > ev.endSlot) // true if overlapping
+  })
+}
+
 
 
 

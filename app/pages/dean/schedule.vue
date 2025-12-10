@@ -85,16 +85,16 @@
     </v-card>
 
     <!-- Calendar -->
-    <v-card>
-      <ScheduleCalendar
+    <ScheduleCalendar
         :loading="loading"
         :days="days"
         :periods="periods"
         :events="events"
         @create-range="handleCreateRange"
-        @event-click="handleEventClick"
+        @event-drop="handleUpdateEvent"
+        @open-editor="handleOpenEditor"
       />
-    </v-card>
+
 
     <!-- Simple Schedule Drawer (create/edit) -->
     <v-navigation-drawer
@@ -573,19 +573,13 @@ function resetForm() {
   }
 }
 
-function handleCreateRange(payload: CreateRangePayload) {
-  resetForm()
-  form.value.day = payload.day
-  form.value.period_start_id = payload.period_start_id
-  form.value.period_end_id = payload.period_end_id
+function handleOpenEditor({ id }: { id: string }) {
+  const ev = events.value.find(e => e.id === id)
+  if (!ev) return
 
-  drawerOpen.value = true
-  editingEvent.value = null
-}
-
-function handleEventClick(ev: any) {
-  // Later: support editing
   editingEvent.value = ev
+  drawerOpen.value = true
+
   form.value = {
     class_id: ev.class_id,
     subject_id: ev.subject_id,
@@ -597,8 +591,54 @@ function handleEventClick(ev: any) {
     period_end_id: ev.period_end_id,
     subject_is_major: !ev.subject?.is_gened
   }
-  drawerOpen.value = true
 }
+
+
+async function handleUpdateEvent(payload: any) {
+  saving.value = true
+
+  try {
+    const { data: { session } } = await $supabase.auth.getSession()
+
+    await $fetch("/api/schedules/update", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+      body: payload
+    })
+
+    snackbar.value = {
+      show: true,
+      message: "Updated.",
+      canUndo: false,
+      undoId: null,
+      timeout: 3000
+    }
+
+    await loadSchedules()
+  } finally {
+    saving.value = false
+  }
+}
+
+
+function handleCreateRange(payload: CreateRangePayload) {
+  resetForm()
+
+  form.value.day = payload.day
+  form.value.period_start_id = payload.period_start_id
+  form.value.period_end_id = payload.period_end_id
+
+  // Auto-select subject if only one subject exists
+  const subjectOnly = subjectOptions.value?.[0]
+  if (subjectOnly) {
+    form.value.subject_id = subjectOnly.value
+  }
+
+  drawerOpen.value = true
+  editingEvent.value = null
+}
+
+
 
 /* ---------- SAVE / UNDO ---------- */
 

@@ -6,13 +6,10 @@
     temporary
   >
     <v-card flat class="pa-4">
-
       <!-- Header -->
       <div class="d-flex justify-space-between align-center mb-2">
         <div>
-          <h3 class="text-h6 font-weight-medium">
-            {{ headerTitle }}
-          </h3>
+          <h3 class="text-h6 font-weight-medium">{{ headerTitle }}</h3>
           <div v-if="summaryLabel" class="text-caption text-medium-emphasis mt-1">
             {{ summaryLabel }}
           </div>
@@ -25,19 +22,7 @@
 
       <v-divider class="my-3" />
 
-      <!-- Role notice -->
-      <v-alert
-        v-if="role === 'ADMIN'"
-        type="info"
-        variant="tonal"
-        border="start"
-        density="comfortable"
-        class="mb-3"
-      >
-        Read-only mode — Admin cannot create or update schedules.
-      </v-alert>
-
-      <!-- Conflict / validation alert -->
+      <!-- Validation alert -->
       <v-alert
         v-if="validationMessage"
         type="warning"
@@ -52,56 +37,58 @@
       <!-- Class -->
       <v-select
         v-model="local.class_id"
-        :items="filteredClasses"
-        item-title="class_name"
+        :items="classesSafe"
+        :item-title="classLabel"
         item-value="id"
         label="Class"
-        variant="outlined"
         density="comfortable"
-        :disabled="role === 'ADMIN'"
+        variant="outlined"
         class="mb-3"
+        :disabled="role === 'ADMIN'"
+        clearable
       />
 
       <!-- Subject -->
       <v-select
         v-model="local.subject_id"
         :items="filteredSubjects"
-        item-title="description"
+        :item-title="subjectLabel"
         item-value="id"
         label="Subject"
-        variant="outlined"
         density="comfortable"
-        :disabled="!local.class_id || role === 'ADMIN'"
+        variant="outlined"
         class="mb-3"
+        :disabled="!local.class_id || role === 'ADMIN'"
         hint="Filtered by selected class & term"
         persistent-hint
+        clearable
       />
 
       <!-- Faculty -->
       <v-select
         v-model="local.faculty_id"
-        :items="filteredFaculty"
+        :items="facultyList"
         item-title="full_name"
         item-value="id"
         label="Teacher (optional)"
-        variant="outlined"
         density="comfortable"
-        :disabled="role === 'ADMIN'"
+        variant="outlined"
         class="mb-3"
+        :disabled="role === 'ADMIN'"
         clearable
       />
 
       <!-- Room -->
       <v-select
         v-model="local.room_id"
-        :items="rooms"
+        :items="roomsSafe"
         item-title="name"
         item-value="id"
         label="Room (optional)"
-        variant="outlined"
         density="comfortable"
-        :disabled="role === 'ADMIN'"
+        variant="outlined"
         class="mb-3"
+        :disabled="role === 'ADMIN'"
         clearable
       />
 
@@ -109,20 +96,20 @@
       <v-select
         v-model="local.mode"
         :items="modeItems"
-        item-title="label"
+        :item-title="modeLabel"
         item-value="value"
         label="Mode"
         density="comfortable"
         variant="outlined"
-        :disabled="role === 'ADMIN'"
         class="mb-3"
+        :disabled="role === 'ADMIN'"
       />
 
-      <!-- Day (can be locked if calendar already chose the day) -->
+      <!-- Day -->
       <v-select
         v-model="local.day"
-        :items="dayItems"
-        item-title="label"
+        :items="daysSafe"
+        :item-title="dayLabel"
         item-value="value"
         label="Day"
         density="comfortable"
@@ -136,8 +123,8 @@
         <v-col>
           <v-select
             v-model="local.period_start_id"
-            :items="periods"
-            item-title="label"
+            :items="periodsSafe"
+            :item-title="periodLabel"
             item-value="id"
             label="Start Time"
             density="comfortable"
@@ -148,8 +135,8 @@
         <v-col>
           <v-select
             v-model="local.period_end_id"
-            :items="periods"
-            item-title="label"
+            :items="periodsSafe"
+            :item-title="periodLabel"
             item-value="id"
             label="End Time"
             density="comfortable"
@@ -163,9 +150,7 @@
 
       <!-- Actions -->
       <div class="d-flex justify-end">
-        <v-btn variant="text" @click="close">
-          Cancel
-        </v-btn>
+        <v-btn variant="text" @click="close">Cancel</v-btn>
 
         <v-btn
           v-if="role !== 'ADMIN'"
@@ -180,17 +165,11 @@
       </div>
     </v-card>
 
-    <!-- Conflict / validation snackbar -->
-    <v-snackbar
-      v-model="snackbar.show"
-      location="bottom"
-      :timeout="snackbar.timeout"
-    >
+    <!-- Snackbar -->
+    <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
       {{ snackbar.message }}
       <template #actions>
-        <v-btn variant="text" @click="snackbar.show = false">
-          Close
-        </v-btn>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
       </template>
     </v-snackbar>
   </v-navigation-drawer>
@@ -199,246 +178,228 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
 
-type Role = "ADMIN" | "DEAN" | "GENED" | "FACULTY"
-type DrawerMode = "CREATE" | "MOVE" | "RESIZE"
-
-type PeriodOption = {
+//
+// Types matching your schema
+//
+interface ClassItem {
   id: string
-  label: string
-  slot_index?: number
-  start_time?: string | null
-  end_time?: string | null
-}
-
-type DrawerPayload = {
-  id?: string | null
-  class_id?: string | null
-  subject_id?: string | null
-  faculty_id?: string | null
-  room_id?: string | null
-  mode?: string | null
-  day?: string | null
-  period_start_id?: string | null
-  period_end_id?: string | null
+  class_name: string
+  year_level_number: number
+  year_level_label: string
+  section: string
   academic_term_id?: string | null
 }
 
-// ---------- PROPS / EMITS ----------
+interface SubjectItem {
+  id: string
+  course_code: string
+  description: string
+  year_level_number: number
+  year_level_label?: string
+  semester: string
+  is_gened?: boolean
+}
+
+interface FacultyItem {
+  id: string
+  first_name: string
+  last_name: string
+  subject_ids?: string[]
+}
+
+interface PeriodItem {
+  id: string
+  label: string
+  start_time?: string
+  end_time?: string
+  slot_index?: number
+}
+
+interface DayItem {
+  value: string
+  label: string
+}
+
+type Role = "ADMIN" | "DEAN" | "GENED" | "FACULTY"
+type DrawerMode = "CREATE" | "MOVE" | "RESIZE"
+
+//
+// Props
+//
 const props = defineProps<{
   modelValue: boolean
-  role: Role
-  mode: DrawerMode              // CREATE / MOVE / RESIZE from calendar action
-  payload?: DrawerPayload | null
-  classes: any[]
-  subjects: any[]
-  faculty: any[]
-  periods: PeriodOption[]
-  rooms: any[]
-  // Optional helpers for UX
-  days?: { value: string; label: string }[]
-  lockDay?: boolean            // true if calendar already picked day
-  lockTime?: boolean           // true if calendar already picked start/end
+  role?: Role
+  mode: DrawerMode
+  payload?: any | null
+  classes?: ClassItem[] | null
+  subjects?: SubjectItem[] | null
+  classSubjects?: { id: string; class_id: string; subject_id: string; academic_term_id: string }[] | null
+  faculty?: FacultyItem[] | null
+  periods?: PeriodItem[] | null
+  rooms?: any[] | null
+  days?: DayItem[] | null
+  lockDay?: boolean
+  lockTime?: boolean
   currentTermSemester?: string | number | null
 }>()
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void
-  (e: "save", payload: DrawerPayload & { operation: DrawerMode }): void
+  (e: "save", payload: Record<string, any>): void
 }>()
 
-// ---------- MODEL ----------
-const drawerModel = computed({
-  get: () => props.modelValue,
-  set: (v: boolean) => emit("update:modelValue", v)
-})
-
-const local = ref<DrawerPayload>({
-  id: null,
-  class_id: null,
-  subject_id: null,
-  faculty_id: null,
-  room_id: null,
+//
+// Local reactive model
+//
+const local = ref({
+  id: null as string | null,
+  class_id: null as string | null,
+  subject_id: null as string | null,
+  faculty_id: null as string | null,
+  room_id: null as string | null,
   mode: "F2F",
-  day: null,
-  period_start_id: null,
-  period_end_id: null,
-  academic_term_id: null
+  day: null as string | null,
+  period_start_id: null as string | null,
+  period_end_id: null as string | null,
+  academic_term_id: props.currentTermSemester ?? null
 })
 
 const saving = ref(false)
+const snackbar = ref({ show: false, message: "", timeout: 6000 })
 
-// ---------- CONSTANTS ----------
-const defaultDayItems = [
+//
+// Safe fallbacks for possibly undefined props
+//
+const classesSafe = computed(() => props.classes ?? [])
+const subjectsSafe = computed(() => props.subjects ?? [])
+const classSubjectsSafe = computed(() => props.classSubjects ?? [])
+const facultySafe = computed(() => props.faculty ?? [])
+const periodsSafe = computed(() => props.periods ?? [])
+const roomsSafe = computed(() => props.rooms ?? [])
+const daysSafe = computed(() => props.days ?? [
   { value: "MON", label: "Mon" },
   { value: "TUE", label: "Tue" },
   { value: "WED", label: "Wed" },
   { value: "THU", label: "Thu" },
   { value: "FRI", label: "Fri" },
   { value: "SAT", label: "Sat" }
-]
+])
 
-const dayItems = computed(() => props.days ?? defaultDayItems)
+//
+// UI helpers (named to avoid 'unknown' TS issues in templates)
+//
+const classLabel = (c: ClassItem) => `${c.class_name} ${c.year_level_label} - ${c.section}`
+const subjectLabel = (s: SubjectItem) => `${s.course_code} — ${s.description}`
+const facultyLabel = (f: any) => `${f.last_name}, ${f.first_name}`
+const periodLabel = (p: PeriodItem) => p.label ?? `${p.start_time ?? ""} - ${p.end_time ?? ""}`
+const dayLabel = (d: DayItem) => d.label
+const role = props.role ?? "DEAN"
 
 const modeItems = [
   { value: "F2F", label: "Face to Face" },
   { value: "ONLINE", label: "Online" },
   { value: "ASYNC", label: "Asynchronous" }
 ]
+const modeLabel = (m: { value: string; label: string }) => m.label
 
-// ---------- DERIVED ----------
-const isEdit = computed(() => !!local.value.id)
+//
+// Computeds & filters
+//
+const facultyList = computed(() =>
+  facultySafe.value.map(f => ({ ...f, full_name: facultyLabel(f) }))
+)
 
-const headerTitle = computed(() => {
-  if (props.mode === "MOVE") return "Move Schedule"
-  if (props.mode === "RESIZE") return "Resize Schedule"
-  if (isEdit.value) return "Update Schedule"
-  return "Create Schedule"
-})
-
-// Build map of period → ordering
-const periodOrderMap = computed(() => {
-  const map = new Map<string, number>()
-  props.periods.forEach((p, idx) => {
-    const order = p.slot_index ?? idx
-    map.set(p.id, order)
-  })
-  return map
-})
-
-function findPeriodById(id?: string | null): PeriodOption | null {
-  if (!id) return null
-  return props.periods.find(p => p.id === id) ?? null
-}
-
-function formatTimeLabel(p: PeriodOption | null): string {
-  if (!p) return ""
-
-  const start = p.start_time ?? ""
-  const end = p.end_time ?? ""
-
-  if (start && end) {
-    const [rawSh, rawSm] = start.split(":")
-    const [rawEh, rawEm] = end.split(":")
-
-    const sh = rawSh ?? "00"
-    const sm = rawSm ?? "00"
-    const eh = rawEh ?? "00"
-    const em = rawEm ?? "00"
-
-    const format = (h: string, m: string) => {
-      const hh = Number(h)
-      if (isNaN(hh)) return ""
-      const labelH = hh % 12 || 12
-      const suffix = hh >= 12 ? "PM" : "AM"
-      return `${labelH}:${m} ${suffix}`
-    }
-
-    // ⬇⬇ TS fix → explicit cast that format() receives guaranteed string
-    return `${format(String(sh), String(sm))} – ${format(String(eh), String(em))}`
-  }
-
-  return p.label || ""
-}
-
-
-
-
-const summaryLabel = computed(() => {
-  const day = dayItems.value.find(d => d.value === local.value.day)?.label ?? ""
-  const startP = findPeriodById(local.value.period_start_id ?? null)
-  const endP = findPeriodById(local.value.period_end_id ?? null)
-  const timeText =
-    startP && endP
-      ? formatTimeLabel({
-          ...startP,
-          end_time: endP.end_time ?? startP.end_time ?? null
-        })
-      : ""
-
-  const bits: string[] = []
-  if (day) bits.push(day)
-  if (timeText) bits.push(timeText)
-  return bits.join(" · ")
-})
-
-// ---------- FILTERED OPTIONS ----------
-const filteredClasses = computed(() => {
-  // For now all classes are visible; role-based filter can be added if needed
-  return props.classes
-})
-
+/**
+ * Filter subjects using class_subjects table (server-driven)
+ * Only include subjects assigned to selected class for the current academic term.
+ */
 const filteredSubjects = computed(() => {
   if (!local.value.class_id) return []
 
-  const cls = props.classes.find(c => c.id === local.value.class_id)
+  const cls = classesSafe.value.find(c => c.id === local.value.class_id)
   if (!cls) return []
 
-  const yearLevel = cls.year_level_number ?? cls.year_level ?? null
-  const currentSem = props.currentTermSemester ?? null
+  const classYear = cls.year_level_number
+  const termSemester = props.currentTermSemester // 1ST / 2ND / SUMMER
 
-  return props.subjects.filter((s: any) => {
-    const sameYear =
-      yearLevel == null ||
-      s.year_level_number === yearLevel ||
-      s.year_level === yearLevel
+  // 1 — subjects that match CLASS YEAR + TERM SEMESTER
+  let eligible = subjectsSafe.value.filter(s =>
+    s.year_level_number === classYear &&
+    s.semester === termSemester
+  )
 
-    const sameSem =
-      currentSem == null ||
-      s.semester === currentSem ||
-      s.term === currentSem
+  // 2 — include additional subjects explicitly added in class_subjects
+  const overrideIds = classSubjectsSafe.value
+    .filter(cs => cs.class_id === cls.id && cs.academic_term_id === props.currentTermSemester)
+    .map(cs => cs.subject_id)
 
-    return sameYear && sameSem
-  })
+  const overrideSubs = subjectsSafe.value.filter(s => overrideIds.includes(s.id))
+
+  // 3 — merge + dedupe
+  const combined = [...eligible, ...overrideSubs]
+  const unique = combined.filter((s, i, arr) => arr.findIndex(t => t.id === s.id) === i)
+
+  return unique
 })
 
-const filteredFaculty = computed(() => {
-  // Here you could later filter by subject specialization, etc.
-  return props.faculty
+
+//
+// Header / summary
+//
+const isEdit = computed(() => !!local.value.id)
+
+const headerTitle = computed(() =>
+  props.mode === "MOVE"
+    ? "Move Schedule"
+    : props.mode === "RESIZE"
+    ? "Resize Schedule"
+    : isEdit.value
+    ? "Update Schedule"
+    : "Create Schedule"
+)
+
+const summaryLabel = computed(() => {
+  if (!local.value.day || !local.value.period_start_id) return ""
+  const dayTxt = daysSafe.value.find(d => d.value === local.value.day)?.label ?? ""
+  const start = periodsSafe.value.find(p => p.id === local.value.period_start_id)
+  const end = periodsSafe.value.find(p => p.id === local.value.period_end_id)
+  if (!start || !end) return dayTxt
+  return `${dayTxt} · ${periodLabel(start)}`
 })
 
-// ---------- VALIDATION ----------
+//
+// Validation
+//
 const validationMessage = computed(() => {
   if (!local.value.class_id) return "Please select a class."
   if (!local.value.subject_id) return "Please select a subject."
   if (!local.value.day) return "Please select a day."
-  if (!local.value.period_start_id || !local.value.period_end_id) {
-    return "Please select both start and end time."
-  }
+  if (!local.value.period_start_id || !local.value.period_end_id) return "Please select both start and end time."
 
-  const startOrder = periodOrderMap.value.get(local.value.period_start_id)
-  const endOrder = periodOrderMap.value.get(local.value.period_end_id)
-
-  if (startOrder == null || endOrder == null) {
-    return "Invalid time selection."
-  }
-
-  if (endOrder < startOrder) {
-    return "End time must be after start time."
-  }
-
+  const startIdx = periodsSafe.value.find(p => p.id === local.value.period_start_id)?.slot_index ?? null
+  const endIdx = periodsSafe.value.find(p => p.id === local.value.period_end_id)?.slot_index ?? null
+  if (startIdx == null || endIdx == null) return "Invalid time selection."
+  if (endIdx < startIdx) return "End time must be after start time."
   return ""
 })
-
 const isValid = computed(() => validationMessage.value === "")
 
-// ---------- SNACKBAR ----------
-const snackbar = ref({
-  show: false,
-  message: "",
-  timeout: 6000
-})
+//
+// Watchers
+//
 
-// ---------- WATCHERS ----------
-
-// Sync local state from incoming payload
+// Sync incoming payload -> local state, but preserve calendar-chosen time when creating a new range
 watch(
   () => props.payload,
   (val) => {
-    const termId =
-      props.currentTermSemester != null
-        ? String(props.currentTermSemester)
-        : null
+    // Preserve any previously selected day/time (this allows calendar's selection to survive opening the drawer)
+    const preserved = {
+      day: local.value.day,
+      start: local.value.period_start_id,
+      end: local.value.period_end_id
+    }
 
+    // If payload missing -> new blank but prefer preserved times
     if (!val) {
       local.value = {
         id: null,
@@ -447,103 +408,116 @@ watch(
         faculty_id: null,
         room_id: null,
         mode: "F2F",
-        day: null,
-        period_start_id: null,
-        period_end_id: null,
-        academic_term_id: termId
+        day: preserved.day ?? null,
+        period_start_id: preserved.start ?? null,
+        period_end_id: preserved.end ?? null,
+        academic_term_id: props.currentTermSemester ?? null
       }
-    } else {
-      local.value = {
-        id: val.id ?? null,
-        class_id: val.class_id ?? null,
-        subject_id: val.subject_id ?? null,
-        faculty_id: val.faculty_id ?? null,
-        room_id: val.room_id ?? null,
-        mode: val.mode ?? "F2F",
-        day: val.day ?? null,
-        period_start_id: val.period_start_id ?? null,
-        period_end_id: val.period_end_id ?? null,
-        academic_term_id: termId
-      }
+      return
+    }
+
+    // Merge payload into local but robustly extract period ids:
+    const periodStartId =
+      val.period_start_id ??
+      (val.period_start?.id ? val.period_start.id : null) ??
+      (typeof val.startSlot === "number"
+        ? periodsSafe.value.find(p => p.slot_index === val.startSlot)?.id
+        : null)
+
+    const periodEndId =
+      val.period_end_id ??
+      (val.period_end?.id ? val.period_end.id : null) ??
+      (typeof val.endSlot === "number"
+        ? periodsSafe.value.find(p => p.slot_index === val.endSlot)?.id
+        : null)
+
+    local.value = {
+      id: val.id ?? null,
+      class_id: val.class_id ?? val.class ?? null,
+      subject_id: val.subject_id ?? null,
+      faculty_id: val.faculty_id ?? null,
+      room_id: val.room_id ?? null,
+      mode: val.mode ?? "F2F",
+      day: val.day ?? null,
+      period_start_id: periodStartId ?? preserved.start ?? null,
+      period_end_id: periodEndId ?? preserved.end ?? null,
+      academic_term_id: props.currentTermSemester ?? val.academic_term_id ?? null
+    }
+
+    // If create-range (no id) but preserved slot exists keep preserved
+    if (!val.id && preserved.start && preserved.end) {
+      local.value.day = preserved.day ?? local.value.day
+      local.value.period_start_id = preserved.start
+      local.value.period_end_id = preserved.end
     }
   },
   { immediate: true }
 )
 
-
-
-// Smart autofill: when class changes → auto pick subject if only 1
+// When class changes -> reset subject (auto-pick if only 1 available)
 watch(
   () => local.value.class_id,
   () => {
-    // reset subject & faculty when class changes
     local.value.subject_id = null
-    local.value.faculty_id = null
-
-    const subs = filteredSubjects.value
-    if (subs.length === 1) {
-      local.value.subject_id = subs[0].id
-    }
+    const subs = Array.isArray(filteredSubjects?.value)
+      ? filteredSubjects.value
+      : []
+    if (subs.length === 1) local.value.subject_id = subs[0]?.id ?? null
   }
 )
 
-// Smart autofill: when subject changes → try deduce teacher
+// If filteredSubjects no longer contains the selected subject, clear it
 watch(
-  () => local.value.subject_id,
-  (subjectId) => {
-    if (!subjectId) {
-      local.value.faculty_id = null
-      return
-    }
-
-    // 1) Look for faculty with a custom mapping field (if your schema supports it)
-    const specialized = props.faculty.find((f: any) => {
-      if (Array.isArray(f.subject_ids)) {
-        return f.subject_ids.includes(subjectId)
-      }
-      if (Array.isArray(f.specialization_subject_ids)) {
-        return f.specialization_subject_ids.includes(subjectId)
-      }
-      return false
-    })
-
-    if (specialized) {
-      local.value.faculty_id = specialized.id
-      return
-    }
-
-    // 2) Fallback: if there is exactly one teacher, auto-select
-    if (!local.value.faculty_id && props.faculty.length === 1) {
-      local.value.faculty_id = props.faculty[0].id
+  () => filteredSubjects.value.map(s => s.id).join(","),
+  () => {
+    if (local.value.subject_id && !filteredSubjects.value.some(s => s.id === local.value.subject_id)) {
+      local.value.subject_id = null
     }
   }
 )
 
-// ---------- METHODS ----------
+// Sync incoming faculty id (e.g., when open-from-faculty view)
+watch(
+  () => props.payload?.faculty_id,
+  (val) => {
+    if (val) local.value.faculty_id = val
+  },
+  { immediate: true }
+)
+
+//
+// Methods
+//
 function handleSaveClick() {
   if (!isValid.value) {
-    snackbar.value.message = validationMessage.value || "Please fix the form."
-    snackbar.value.show = true
+    snackbar.value = { show: true, message: validationMessage.value ?? "Fix the form.", timeout: 6000 }
     return
   }
 
   saving.value = true
   try {
-    emit("save", {
-      ...(local.value as DrawerPayload),
-      operation: props.mode
-    })
-    // Parent will actually call the API & handle conflicts.
+    emit("save", { ...local.value, operation: props.mode })
   } finally {
     saving.value = false
   }
 }
 
 function close() {
-  drawerModel.value = false
+  emit("update:modelValue", false)
 }
+
+//
+// Drawer binding
+//
+const drawerModel = computed({
+  get: () => props.modelValue,
+  set: (v: boolean) => emit("update:modelValue", v)
+})
 </script>
 
 <style scoped>
-/* (optional) You can add small tweaks here if needed */
+/* small UX polish */
+.v-navigation-drawer .v-card {
+  min-height: 100%;
+}
 </style>

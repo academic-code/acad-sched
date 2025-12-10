@@ -1,6 +1,5 @@
 <template>
   <div class="schedule-calendar">
-    
     <!-- Header -->
     <div class="calendar-header">
       <div class="time-column"></div>
@@ -11,7 +10,6 @@
 
     <!-- Grid -->
     <div class="calendar-grid">
-      
       <!-- Time Column -->
       <div class="time-column">
         <div v-for="slot in periods" :key="slot.id" class="time-label">
@@ -29,17 +27,30 @@
           @mouseup="finishDrag"
           @mousemove="dragMove"
         >
-          <!-- Time grid cells -->
-          <div
-            v-for="(slot, i) in periods"
-            :key="slot.id"
-            class="grid-cell"
-            :class="{ highlight: dragging && i >= dragMin && i <= dragMax }"
-          ></div>
+    
+<!-- Base grid -->
+<div
+  v-for="slot in periods"
+  :key="slot.id"
+  class="grid-cell"
+></div>
+
+<!-- Unified highlight overlay -->
+<div
+  v-if="dragging && dragState?.day === day.value"
+  class="highlight-block"
+  :style="{
+    top: `${dragMin * getSlotHeight()}px`,
+    height: `${(dragMax - dragMin + 1) * getSlotHeight()}px`
+  }"
+></div>
+
+
+
 
           <!-- Events -->
           <div
-            v-for="ev in (eventsByDay[day.value] || [])"
+            v-for="ev in (eventsByDay[String(day.value)] || [])"
             :key="ev.id"
             class="event"
             :style="eventStyle(ev)"
@@ -47,25 +58,41 @@
           >
             {{ ev.label }}
           </div>
+
+          <!-- 👇 NEW FIXED PREVIEW HERE -->
+          <div 
+            v-if="previewBlock && dragState?.day === day.value"
+            class="preview-event"
+            :style="previewBlock.style"
+          >
+            {{ dragMode === "MOVE" ? "Move..." : "New Schedule" }}
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Drag Preview -->
-    <div v-if="previewBlock" class="preview-event" :style="previewBlock.style">
-      {{ dragMode === 'MOVE' ? 'Move...' : 'New Schedule' }}
-    </div>
 
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from "vue"
+import type { CSSProperties } from "vue"
 
-/* Emits */
+
+/* Emits (typed) */
 const emit = defineEmits<{
-  (e: "create-range", payload: { day: string; period_start_id: string; period_end_id: string }): void
-  (e: "event-drop", payload: { id: string; day: string; period_start_id: string; period_end_id: string }): void
+  (e: "create-range", payload: {
+    day: string
+    period_start_id: string
+    period_end_id: string
+  }): void
+  (e: "event-drop", payload: {
+    id: string
+    day: string
+    period_start_id: string
+    period_end_id: string
+  }): void
 }>()
 
 /* Props */
@@ -75,15 +102,23 @@ const props = defineProps<{
   events?: any[]
 }>()
 
-/* Group Events by Day */
-const eventsByDay = computed(() => {
+/* Group Events By Day - TS safe */
+const eventsByDay = computed<Record<string, any[]>>(() => {
   const map: Record<string, any[]> = {}
-  props.days.forEach(d => (map[d.value] = []))
-  ;(props.events ?? []).forEach(ev => {
-    if (ev?.day && map?.[ev.day]) {
-  map[ev.day]!.push(ev)
-}
-  })
+
+  // initialize buckets
+  for (const d of props.days) {
+    map[d.value] = []
+  }
+
+  // assign events safely
+  for (const ev of props.events ?? []) {
+    const key = ev?.day as string | undefined
+    if (!key) continue
+    const bucket = map[key] ?? (map[key] = [])
+    bucket.push(ev)
+  }
+
   return map
 })
 
@@ -91,32 +126,44 @@ const eventsByDay = computed(() => {
 const dragState = ref<null | { day: string; startSlot: number; event?: any }>(null)
 const dragMode = ref<"CREATE" | "MOVE">("CREATE")
 const previewBlock = ref<{ style: Record<string, string> } | null>(null)
+
 const dragging = ref(false)
 const dragMin = ref(-1)
 const dragMax = ref(-1)
 
-/* Helpers */
-const safeTarget = (evt: MouseEvent) =>
-  evt.target instanceof HTMLElement ? evt.target : null
-
-const getSlotHeight = () => {
-  const el = document.querySelector(".grid-cell")
-  return (el as HTMLElement | null)?.offsetHeight ?? 50
+/* ---- Safe DOM helpers ---- */
+function safeTarget(evt: MouseEvent): HTMLElement | null {
+  return evt.target instanceof HTMLElement ? evt.target : null
 }
 
+function getSlotHeight(): number {
+  if (typeof window === "undefined") return 50
+  const el = document.querySelector(".grid-cell")
+  if (el instanceof HTMLElement) {
+    return el.offsetHeight || 50
+  }
+  return 50
+}
 
 function getSlot(evt: MouseEvent): number {
-  const t = safeTarget(evt)
-  const col = t?.closest(".day-column") as HTMLElement | null
-  if (!col) return -1
-  const rect = col.getBoundingClientRect()
-  return Math.floor((evt.clientY - rect.top) / getSlotHeight())
+  const target = safeTarget(evt)
+  if (!target) return -1
+
+  const column = target.closest(".day-column") as HTMLElement | null
+  if (!column) return -1
+
+  const rect = column.getBoundingClientRect()
+  const height = getSlotHeight()
+  const offsetY = evt.clientY - rect.top
+
+  return Math.floor(offsetY / height)
 }
 
-/* Start Create */
+/* ---- Create New Schedule ---- */
 function startNewDrag(day: string, evt: MouseEvent) {
-  const t = safeTarget(evt)
-  if (!t?.closest(".grid-cell")) return
+  const target = safeTarget(evt)
+  if (!target) return
+  if (!target.closest(".grid-cell")) return // prevent header drag
 
   const slot = getSlot(evt)
   if (slot < 0) return
@@ -128,7 +175,7 @@ function startNewDrag(day: string, evt: MouseEvent) {
   dragMax.value = slot
 }
 
-/* Start Move */
+/* ---- Move Existing ---- */
 function startMove(ev: any, day: string, evt: MouseEvent) {
   dragMode.value = "MOVE"
   dragState.value = { day, startSlot: ev.startSlot, event: ev }
@@ -136,64 +183,89 @@ function startMove(ev: any, day: string, evt: MouseEvent) {
   dragMin.value = ev.startSlot
   dragMax.value = ev.endSlot
 
-  const t = safeTarget(evt)
-  const col = t?.closest(".day-column") as HTMLElement | null
-  const parent = col?.parentElement as HTMLElement | null
-  if (!col || !parent) return
-
-  const height = getSlotHeight()
-  previewBlock.value = {
-    style: {
-      top: `${dragMin.value * height}px`,
-      height: `${(dragMax.value - dragMin.value + 1) * height}px`,
-      left: `${col.offsetLeft - parent.offsetLeft}px`,
-      width: `${col.offsetWidth}px`
-    }
+  // initial preview in correct column
+  const target = safeTarget(evt)
+  const column = target?.closest(".day-column") as HTMLElement | null
+  if (column) {
+    const height = getSlotHeight()
+    previewBlock.value = {
+  style: {
+    position: "absolute",
+    top: `${dragMin.value * height}px`,
+    height: `${(dragMax.value - dragMin.value + 1) * height}px`,
+    left: "0px",
+    right: "0px",
+    pointerEvents: "none"
   }
 }
 
-/* Move Drag */
+
+  }
+}
+
+/* ---- Drag ---- */
 function dragMove(evt: MouseEvent) {
   if (!dragState.value) return
 
-  const t = safeTarget(evt)
-  const col = t?.closest(".day-column") as HTMLElement | null
-  const parent = col?.parentElement as HTMLElement | null
-  if (!col || !parent) return
+  const target = safeTarget(evt)
+  if (!target) return
+
+  const column = target.closest(".day-column") as HTMLElement | null
+  if (!column) return
+
+  const clamped = Math.max(0, Math.min(getSlot(evt), props.periods.length - 1))
+  dragMin.value = Math.min(dragState.value.startSlot, clamped)
+  dragMax.value = Math.max(dragState.value.startSlot, clamped)
 
   const height = getSlotHeight()
-  const slot = Math.max(0, Math.min(getSlot(evt), props.periods.length - 1))
-  dragMin.value = Math.min(dragState.value.startSlot, slot)
-  dragMax.value = Math.max(dragState.value.startSlot, slot)
 
   previewBlock.value = {
-    style: {
-      top: `${dragMin.value * height}px`,
-      height: `${(dragMax.value - dragMin.value + 1) * height}px`,
-      left: `${col.offsetLeft - parent.offsetLeft}px`,
-      width: `${col.offsetWidth}px`
-    }
+  style: {
+    position: "absolute",
+    top: `${dragMin.value * height}px`,
+    height: `${(dragMax.value - dragMin.value + 1) * height}px`,
+    left: "0px",
+    right: "0px",
+    pointerEvents: "none"
   }
 }
 
-/* Finish Drag */
-function finishDrag() {
-  if (!dragState.value) return resetDrag()
+}
 
-  const start = props.periods[dragMin.value]
-  const end = props.periods[dragMax.value]
-  if (!start || !end) return resetDrag()
+
+/* ---- Finish ---- */
+function finishDrag(_evt: MouseEvent) {
+  if (!dragState.value) {
+    resetDrag()
+    return
+  }
+
+  const startPeriod = props.periods[dragMin.value]
+  const endPeriod = props.periods[dragMax.value]
+
+  if (!startPeriod || !endPeriod) {
+    resetDrag()
+    return
+  }
 
   if (dragMode.value === "CREATE") {
-    emit("create-range", { day: dragState.value.day, period_start_id: start.id, period_end_id: end.id })
+    emit("create-range", {
+      day: dragState.value.day,
+      period_start_id: startPeriod.id,
+      period_end_id: endPeriod.id
+    })
   } else if (dragState.value.event) {
-    emit("event-drop", { id: dragState.value.event.id, day: dragState.value.day, period_start_id: start.id, period_end_id: end.id })
+    emit("event-drop", {
+      id: String(dragState.value.event.id),
+      day: dragState.value.day,
+      period_start_id: startPeriod.id,
+      period_end_id: endPeriod.id
+    })
   }
 
   resetDrag()
 }
 
-/* Reset */
 function resetDrag() {
   dragState.value = null
   previewBlock.value = null
@@ -202,29 +274,47 @@ function resetDrag() {
   dragMax.value = -1
 }
 
-/* Style for events */
-function eventStyle(ev: any) {
+/* ---- Display helpers ---- */
+function eventStyle(ev: any): CSSProperties {
   const height = getSlotHeight()
+  const start = Number(ev.startSlot ?? 0)
+  const end = Number(ev.endSlot ?? start)
+
   return {
-    top: `${ev.startSlot * height}px`,
-    height: `${(ev.endSlot - ev.startSlot + 1) * height}px`,
-    background: ev.subject?.is_gened ? "#ffc107" : "#1e88e5"
+    position: "absolute",
+    top: `${start * height}px`,
+    height: `${(end - start + 1) * height}px`,
+    left: "0px",
+    right: "0px",
+    padding: "4px",
+    boxSizing: "border-box", // now typed correctly
+    background: ev.subject?.is_gened ? "#ffc107" : "#1e88e5",
+    borderRadius: "6px",
+    color: "#fff",
+    zIndex: 20,
+    cursor: "grab"
   }
 }
 
-function formatTime(time: string) {
+
+
+function formatTime(time: string): string {
   if (!time) return ""
   const parts = time.split(":")
-  const h = parts[0] ?? "0"
+  const hStr = parts[0] ?? "0"
   const m = parts[1] ?? "00"
-  const hour = Number(h)
-  return `${(hour % 12 || 12)}:${m} ${hour >= 12 ? "PM" : "AM"}`
+  const hourNum = Number(hStr)
+  const suffix = hourNum >= 12 ? "PM" : "AM"
+  const displayHour = (hourNum % 12) || 12
+  return `${displayHour}:${m} ${suffix}`
 }
-
 </script>
 
 <style scoped>
-.schedule-calendar { width: 100%; user-select: none; }
+.schedule-calendar {
+  width: 100%;
+  user-select: none;
+}
 
 /* Header */
 .calendar-header {
@@ -234,60 +324,84 @@ function formatTime(time: string) {
   border-bottom: 1px solid #ddd;
 }
 
-.day-header { text-align: center; padding: 4px 0; }
+.day-header {
+  text-align: center;
+  padding: 4px 0;
+}
 
-/* Grid Machine */
-.calendar-grid { display: flex; }
-.time-column { width: 90px; position: sticky; left: 0; background: white; z-index: 5; }
+/* Grid */
+.calendar-grid {
+  display: flex;
+}
+
+.time-column {
+  width: 90px;
+}
 
 .time-label {
   height: 50px;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  font-size:11px;
-  color:#555;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 11px;
+  color: #555;
 }
 
-/* Fix Layout Width */
 .calendar-columns {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
-  position: relative;
+  grid-template-columns: repeat(6, 1fr);
 }
 
 .day-column {
   position: relative;
-  border-right:1px solid #eee;
+  border-right: 1px solid #eee;
 }
 
-/* Cells */
 .grid-cell {
-  height:50px;
-  border-bottom:1px solid #f5f5f5;
+  height: 50px;
+  border-bottom: 1px solid #f5f5f5;
 }
 
-.grid-cell.highlight { background:rgba(0,122,255,0.1); }
+.grid-cell.highlight {
+  background: rgba(0, 122, 255, 0.1);
+}
+
+.highlight-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(0,122,255,0.12);
+  border: 2px dashed #2196f3;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+
 
 /* Events */
 .event {
-  position:absolute;
-  left:2px; right:2px;
-  color:#fff;
-  padding:4px;
-  border-radius:6px;
-  font-size:12px;
-  cursor:pointer;
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  color: #fff;
+  padding: 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  box-sizing: border-box;
+  cursor: pointer;
 }
 
 /* Drag Preview */
 .preview-event {
-  position:absolute;
-  border:2px dashed #2196f3;
-  background:rgba(33,150,243,0.25);
-  border-radius:6px;
-  pointer-events:none;
-  z-index:10;
+  position: absolute;
+  border: 2px dashed #2196f3;
+  background: rgba(33, 150, 243, 0.15);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 50;
+  box-sizing: border-box;
 }
+
 </style>

@@ -252,7 +252,13 @@ async function loadLists() {
 
   faculty.value = (await $supabase.from("faculty").select("*")).data || []
   rooms.value = (await $supabase.from("rooms").select("*")).data || []
-  periods.value = (await $supabase.from("periods").select("*").order("slot_index")).data || []
+  const rawPeriods = (await $supabase.from("periods").select("*").order("slot_index")).data || []
+
+periods.value = rawPeriods.map(p => ({
+  ...p,
+  label: `${p.start_time?.slice(0,5)} - ${p.end_time?.slice(0,5)}`,
+}))
+
 }
 
 async function loadSchedules() {
@@ -285,24 +291,36 @@ async function reloadSchedules() {
 }
 
 /* ------------------------ CALENDAR HANDLERS ------------------------ */
-
 function handleCreateRange(payload: any) {
   drawerMode.value = "CREATE"
-  drawerPayload.value = payload
+  drawerPayload.value = {
+    ...payload,
+    class_id: selectedClassId.value // sync dropdown class
+  }
   drawerLockDay.value = true
   drawerLockTime.value = true
   drawerOpen.value = true
 }
 
+
 function handleUpdateEvent(payload: any) {
   drawerMode.value = "RESIZE"
-  drawerPayload.value = payload
+  drawerPayload.value = {
+    ...payload,
+    class_id: selectedClassId.value ?? payload.class_id
+  }
   drawerOpen.value = true
 }
 
 function handleOpenEditor({ id }: { id: string }) {
+  const ev = events.value.find(e => e.id === id)
+  if (!ev) return
+
   drawerMode.value = "MOVE"
-  drawerPayload.value = events.value.find(e => e.id === id)
+  drawerPayload.value = {
+    ...ev,
+    class_id: selectedClassId.value ?? ev.class_id
+  }
   drawerOpen.value = true
 }
 

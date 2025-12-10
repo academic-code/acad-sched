@@ -434,6 +434,11 @@ const snackbar = ref({
 watch(
   () => props.payload,
   (val) => {
+    const termId =
+      props.currentTermSemester != null
+        ? String(props.currentTermSemester)
+        : null
+
     if (!val) {
       local.value = {
         id: null,
@@ -445,26 +450,27 @@ watch(
         day: null,
         period_start_id: null,
         period_end_id: null,
-        academic_term_id: null
+        academic_term_id: termId
       }
-      return
-    }
-
-    local.value = {
-      id: val.id ?? null,
-      class_id: val.class_id ?? null,
-      subject_id: val.subject_id ?? null,
-      faculty_id: val.faculty_id ?? null,
-      room_id: val.room_id ?? null,
-      mode: val.mode ?? "F2F",
-      day: val.day ?? null,
-      period_start_id: val.period_start_id ?? null,
-      period_end_id: val.period_end_id ?? null,
-      academic_term_id: val.academic_term_id ?? null
+    } else {
+      local.value = {
+        id: val.id ?? null,
+        class_id: val.class_id ?? null,
+        subject_id: val.subject_id ?? null,
+        faculty_id: val.faculty_id ?? null,
+        room_id: val.room_id ?? null,
+        mode: val.mode ?? "F2F",
+        day: val.day ?? null,
+        period_start_id: val.period_start_id ?? null,
+        period_end_id: val.period_end_id ?? null,
+        academic_term_id: termId
+      }
     }
   },
   { immediate: true }
 )
+
+
 
 // Smart autofill: when class changes → auto pick subject if only 1
 watch(

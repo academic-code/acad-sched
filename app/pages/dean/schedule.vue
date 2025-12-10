@@ -97,153 +97,23 @@
 
 
     <!-- Simple Schedule Drawer (create/edit) -->
-    <v-navigation-drawer
-      v-model="drawerOpen"
-      location="right"
-      temporary
-      width="420"
-    >
-      <v-card flat class="pa-4">
-        <div class="d-flex justify-space-between align-center mb-3">
-          <h3 class="text-h6 font-weight-medium">
-            {{ editingEvent ? "Edit Schedule" : "Create Schedule" }}
-          </h3>
-          <v-btn icon variant="text" @click="drawerOpen = false">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </div>
+     <ScheduleDrawer
+  v-model="drawerOpen"
+  :role="'DEAN'"
+  :mode="drawerMode"
+  :payload="drawerPayload"
+  :classes="classes"
+  :subjects="subjects"
+  :faculty="faculty"
+  :periods="periods"
+  :rooms="rooms"
+  :days="days"
+  :lock-day="drawerLockDay"
+  :lock-time="drawerLockTime"
+  :current-term-semester="selectedTermId"
+  @save="handleDrawerSave"
+/>
 
-        <v-alert
-          v-if="isGenEdDean && form.subject_is_major"
-          type="warning"
-          border="start"
-          class="mb-3"
-        >
-          GenEd dean can only manage GenEd subjects.
-        </v-alert>
-
-        <!-- Class (readonly in CLASS view, selectable in others) -->
-        <v-select
-          v-if="viewMode !== 'CLASS'"
-          v-model="form.class_id"
-          :items="classOptions"
-          label="Class"
-          item-title="label"
-          item-value="value"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-        />
-        <v-text-field
-          v-else
-          label="Class"
-          :model-value="currentClassLabel"
-          variant="outlined"
-          density="comfortable"
-          class="mb-3"
-          readonly
-        />
-
-        <!-- Subject -->
-        <v-select
-          v-model="form.subject_id"
-          :items="subjectOptions"
-          label="Subject"
-          item-title="label"
-          item-value="value"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-        />
-
-        <!-- Faculty -->
-        <v-select
-          v-model="form.faculty_id"
-          :items="facultyOptions"
-          label="Faculty (optional)"
-          item-title="label"
-          item-value="value"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-          clearable
-        />
-
-        <!-- Room -->
-        <v-select
-          v-model="form.room_id"
-          :items="roomOptions"
-          label="Room (optional)"
-          item-title="label"
-          item-value="value"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-          clearable
-        />
-
-        <!-- Mode -->
-        <v-select
-          v-model="form.mode"
-          :items="modeOptions"
-          label="Mode"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-        />
-
-        <!-- Day -->
-        <v-select
-          v-model="form.day"
-          :items="days"
-          label="Day"
-          item-title="label"
-          item-value="value"
-          density="comfortable"
-          variant="outlined"
-          class="mb-3"
-        />
-
-        <!-- Time Range -->
-        <v-row>
-          <v-col cols="6">
-            <v-select
-              v-model="form.period_start_id"
-              :items="periodOptions"
-              label="Start"
-              item-title="label"
-              item-value="value"
-              density="comfortable"
-              variant="outlined"
-            />
-          </v-col>
-          <v-col cols="6">
-            <v-select
-              v-model="form.period_end_id"
-              :items="periodOptions"
-              label="End"
-              item-title="label"
-              item-value="value"
-              density="comfortable"
-              variant="outlined"
-            />
-          </v-col>
-        </v-row>
-
-        <div class="text-right mt-4">
-          <v-btn variant="text" class="mr-2" @click="drawerOpen = false">
-            Cancel
-          </v-btn>
-          <v-btn
-            color="primary"
-            :loading="saving"
-            @click="saveSchedule(false)"
-          >
-            Save
-          </v-btn>
-        </div>
-      </v-card>
-    </v-navigation-drawer>
 
     <!-- Bottom-center toast for conflicts / undo -->
     <v-snackbar
@@ -271,6 +141,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue"
 import ScheduleCalendar from "~/components/schedule/ScheduleCalendar.vue"
+import ScheduleDrawer from "~/components/schedule/ScheduleDrawer.vue"
+
 import type { Ref } from "vue"
 
 definePageMeta({ layout: "dean" })
@@ -330,6 +202,16 @@ const snackbar = ref<{
   undoId: null,
   timeout: 10000
 })
+
+
+
+const drawerMode = ref<"CREATE" | "MOVE" | "RESIZE">("CREATE")
+const drawerPayload = ref<any | null>(null)
+
+const drawerLockDay = ref(false)
+const drawerLockTime = ref(false)
+
+
 
 /* ---------- CONSTANTS ---------- */
 
@@ -572,100 +454,45 @@ function resetForm() {
     subject_is_major: false
   }
 }
-
 function handleOpenEditor({ id }: { id: string }) {
   const ev = events.value.find(e => e.id === id)
   if (!ev) return
 
-  editingEvent.value = ev
+  drawerMode.value = "MOVE"
+  drawerPayload.value = ev
+  drawerLockDay.value = false
+  drawerLockTime.value = false
   drawerOpen.value = true
-
-  form.value = {
-    class_id: ev.class_id,
-    subject_id: ev.subject_id,
-    faculty_id: ev.faculty_id,
-    room_id: ev.room_id,
-    mode: ev.mode,
-    day: ev.day,
-    period_start_id: ev.period_start_id,
-    period_end_id: ev.period_end_id,
-    subject_is_major: !ev.subject?.is_gened
-  }
 }
 
 
-async function handleUpdateEvent(payload: any) {
-  saving.value = true
-
-  try {
-    const { data: { session } } = await $supabase.auth.getSession()
-
-    await $fetch("/api/schedules/update", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-      body: payload
-    })
-
-    snackbar.value = {
-      show: true,
-      message: "Updated.",
-      canUndo: false,
-      undoId: null,
-      timeout: 3000
-    }
-
-    await loadSchedules()
-  } finally {
-    saving.value = false
-  }
+function handleUpdateEvent(payload: any) {
+  drawerMode.value = "RESIZE"
+  drawerPayload.value = payload
+  drawerLockDay.value = false
+  drawerLockTime.value = false
+  drawerOpen.value = true
 }
 
 
-function handleCreateRange(payload: CreateRangePayload) {
-  resetForm()
 
-  form.value.day = payload.day
-  form.value.period_start_id = payload.period_start_id
-  form.value.period_end_id = payload.period_end_id
-
-  // Auto-select subject if only one subject exists
-  const subjectOnly = subjectOptions.value?.[0]
-  if (subjectOnly) {
-    form.value.subject_id = subjectOnly.value
-  }
-
+function handleCreateRange(payload: any) {
+  drawerMode.value = "CREATE"
+  drawerPayload.value = payload
+  drawerLockDay.value = true
+  drawerLockTime.value = true
   drawerOpen.value = true
-  editingEvent.value = null
 }
 
 
 
 /* ---------- SAVE / UNDO ---------- */
-
-async function saveSchedule(force: boolean) {
-  if (!selectedTermId.value) return
-  if (!form.value.class_id && viewMode.value === "CLASS") {
-    form.value.class_id = selectedClassId.value
-  }
-
+async function handleDrawerSave(payload: any) {
   saving.value = true
   try {
     const { data: { session } } = await $supabase.auth.getSession()
 
-    const payload = {
-      class_id: form.value.class_id,
-      subject_id: form.value.subject_id,
-      faculty_id: form.value.faculty_id,
-      room_id: form.value.room_id,
-      period_start_id: form.value.period_start_id,
-      period_end_id: form.value.period_end_id,
-      day: form.value.day,
-      mode: form.value.mode,
-      academic_term_id: selectedTermId.value,
-      force
-    }
-
-    const res: any = await $fetch("/api/schedules/create", {
+    await $fetch("/api/schedules/save", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session?.access_token}`
@@ -673,59 +500,33 @@ async function saveSchedule(force: boolean) {
       body: payload
     })
 
-    // Success
-    drawerOpen.value = false
     snackbar.value = {
       show: true,
-      message: res.warnings?.length
-        ? res.warnings.join(" ")
-        : "Schedule created.",
-      canUndo: true,
-      undoId: res.undo_id,
-      timeout: 10000
+      message: payload.operation === "CREATE"
+        ? "Schedule added."
+        : payload.operation === "MOVE"
+        ? "Schedule moved."
+        : "Schedule updated.",
+      timeout: 5000,
+      canUndo: false,
+      undoId: null
     }
 
     await loadSchedules()
+    drawerOpen.value = false
   } catch (err: any) {
-    const data = err?.data
-
-    // Soft-flex: faculty / room conflict
-    if (data?.data?.type === "FACULTY_CONFLICT") {
-      snackbar.value = {
-        show: true,
-        message: "Teacher is already booked at this time — tap to override.",
-        canUndo: false,
-        undoId: null,
-        timeout: 8000
-      }
-      // On next save, send force: true
-      await saveSchedule(true)
-      return
-    }
-
-    if (data?.data?.type === "ROOM_CONFLICT") {
-      snackbar.value = {
-        show: true,
-        message: "Room is already used at this time — tap to override.",
-        canUndo: false,
-        undoId: null,
-        timeout: 8000
-      }
-      await saveSchedule(true)
-      return
-    }
-
     snackbar.value = {
       show: true,
-      message: data?.message || "Failed to save schedule.",
+      message: err?.data?.message || "Error saving schedule.",
+      timeout: 6000,
       canUndo: false,
-      undoId: null,
-      timeout: 6000
+      undoId: null
     }
   } finally {
     saving.value = false
   }
 }
+
 
 async function handleUndo() {
   if (!snackbar.value.undoId) return

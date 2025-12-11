@@ -1,351 +1,296 @@
 // server/api/schedules/create.post.ts
 import { readBody, createError } from "h3"
+import { extractBearerToken, getAppUserRecord } from "./_helpers"
 
-type CreateScheduleBody = {
-  class_id: string
-  subject_id: string
-  faculty_id?: string | null
-  room_id?: string | null
-  period_start_id: string
-  period_end_id: string
-  day: string // e.g. 'MON', 'TUE'
-  mode?: string // 'F2F' | 'ONLINE' | 'ASYNC'
-  academic_term_id?: string // optional: will auto-fill from class if missing
-  force?: boolean // allow teacher/room conflicts when true
-}
-
-function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
-  // inclusive ranges using slot_index (1..n)
-  return aStart <= bEnd && bStart <= aEnd
+// overlap detection
+function overlap(a1: number, a2: number, b1: number, b2: number) {
+  return a1 <= b2 && b1 <= a2
 }
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
-  const body = await readBody<CreateScheduleBody>(event)
+  const body = await readBody(event)
 
-  // ------------------ 1️⃣ Basic payload validation ------------------
   const {
     class_id,
     subject_id,
     faculty_id,
     room_id,
+    day,
     period_start_id,
     period_end_id,
-    day,
-    mode,
-    academic_term_id: bodyTermId,
-    force
+    academic_term_id: termOverride,
+    mode = "F2F",
+    force = false
   } = body
 
-  if (!class_id) throw createError({ statusCode: 400, message: "class_id is required." })
-  if (!subject_id) throw createError({ statusCode: 400, message: "subject_id is required." })
-  if (!period_start_id || !period_end_id) {
-    throw createError({ statusCode: 400, message: "period_start_id and period_end_id are required." })
-  }
-  if (!day) throw createError({ statusCode: 400, message: "day is required." })
+  // -----------------------------------------
+  // BASIC REQUIRED FIELDS
+  // -----------------------------------------
+  if (!class_id) throw createError({ statusCode: 400, message: "class_id required" })
+  if (!subject_id) throw createError({ statusCode: 400, message: "subject_id required" })
+  if (!day) throw createError({ statusCode: 400, message: "day required" })
+  if (!period_start_id || !period_end_id)
+    throw createError({ statusCode: 400, message: "period range required" })
 
-  // ------------------ 2️⃣ Auth + actor role ------------------
-  const authHeader = event.node.req.headers.authorization
-  const token = authHeader?.replace("Bearer ", "") ?? null
-  if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
+  // -----------------------------------------
+  // AUTHENTICATION
+  // -----------------------------------------
+  const token = extractBearerToken(event)
+  if (!token) throw createError({ statusCode: 401, message: "Missing token" })
 
-  const { data: authData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !authData?.user) {
-    throw createError({ statusCode: 401, message: "Unauthorized." })
-  }
-
-  const { data: userRecord, error: userErr } = await supabase
-    .from("users")
-    .select("id, role, department_id")
-    .eq("auth_user_id", authData.user.id)
-    .maybeSingle()
-
-  if (userErr || !userRecord) {
-    throw createError({ statusCode: 403, message: "User record not found." })
-  }
-
-  const actorId = userRecord.id
+  const { userRecord } = await getAppUserRecord(supabase, token)
   let userRole = (userRecord.role || "").toUpperCase()
   const userDepartmentId = userRecord.department_id
 
-  // ------------------ 3️⃣ Load core entities (class, subject, term, periods) ------------------
-  // Class
+  // -----------------------------------------
+  // GENED DEAN DETECTION
+  // -----------------------------------------
+  if (userRole === "DEAN" && userDepartmentId) {
+    const { data: dept } = await supabase
+      .from("departments")
+      .select("type")
+      .eq("id", userDepartmentId)
+      .maybeSingle()
+
+    if (dept?.type === "GENED") userRole = "GENED"
+  }
+
+  // -----------------------------------------
+  // LOAD CLASS
+  // -----------------------------------------
   const { data: classRow, error: classErr } = await supabase
     .from("classes")
     .select("id, department_id, academic_term_id")
     .eq("id", class_id)
     .maybeSingle()
 
-  if (classErr || !classRow) {
-    throw createError({ statusCode: 400, message: "Class not found." })
-  }
+  if (classErr || !classRow)
+    throw createError({ statusCode: 400, message: "Class not found" })
 
-  // Subject
-  const { data: subjectRow, error: subjectErr } = await supabase
-    .from("subjects")
-    .select("id, department_id, is_gened")
-    .eq("id", subject_id)
-    .maybeSingle()
+  const scheduleDepartmentId = classRow.department_id
+  const academic_term_id = termOverride || classRow.academic_term_id
 
-  if (subjectErr || !subjectRow) {
-    throw createError({ statusCode: 400, message: "Subject not found." })
-  }
+  if (!academic_term_id)
+    throw createError({ statusCode: 400, message: "Missing academic term" })
 
-  // Academic term: prefer body.academic_term_id, else from class
-  const academic_term_id = bodyTermId || classRow.academic_term_id
-  if (!academic_term_id) {
-    throw createError({
-      statusCode: 400,
-      message: "academic_term_id is required (or must be set on the class)."
-    })
-  }
-
-  const { data: termRow, error: termErr } = await supabase
+  const { data: termRow } = await supabase
     .from("academic_terms")
     .select("id, is_active")
     .eq("id", academic_term_id)
     .maybeSingle()
 
-  if (termErr || !termRow) {
-    throw createError({ statusCode: 400, message: "Academic term not found." })
-  }
-  if (!termRow.is_active) {
-    throw createError({ statusCode: 400, message: "Cannot create schedules in an inactive term." })
-  }
+  if (!termRow)
+    throw createError({ statusCode: 400, message: "Academic term not found" })
 
-  // Periods (for slot_index)
-  const { data: periods, error: periodsErr } = await supabase
-    .from("periods")
-    .select("id, slot_index")
-    .in("id", [period_start_id, period_end_id])
+  if (!termRow.is_active)
+    throw createError({ statusCode: 400, message: "Term is not active" })
 
-  if (periodsErr || !periods || periods.length !== 2) {
-    throw createError({
-      statusCode: 400,
-      message: "Invalid period_start_id or period_end_id."
-    })
-  }
+  // -----------------------------------------
+  // LOAD SUBJECT
+  // -----------------------------------------
+  const { data: subjectRow } = await supabase
+    .from("subjects")
+    .select("id, department_id, is_gened")
+    .eq("id", subject_id)
+    .maybeSingle()
 
-  const startPeriod = periods.find((p) => p.id === period_start_id)!
-  const endPeriod = periods.find((p) => p.id === period_end_id)!
-  const startSlot = Math.min(startPeriod.slot_index, endPeriod.slot_index)
-  const endSlot = Math.max(startPeriod.slot_index, endPeriod.slot_index)
+  if (!subjectRow)
+    throw createError({ statusCode: 400, message: "Subject not found" })
 
-  // Department for this schedule: always from CLASS department
-  const scheduleDepartmentId = classRow.department_id
+  // -----------------------------------------
+  // PERMISSION RULES (DEAN / GENED ONLY)
+  // -----------------------------------------
+  if (userRole === "ADMIN")
+    throw createError({ statusCode: 403, message: "Admins cannot create schedules." })
 
-  // ------------------ 4️⃣ Normalize user role (detect GENED dean) ------------------
-  if (userRole === "DEAN" && userDepartmentId) {
-    const { data: deptRow } = await supabase
-      .from("departments")
-      .select("type")
-      .eq("id", userDepartmentId)
-      .maybeSingle()
-
-    if (deptRow?.type === "GENED") {
-      userRole = "GENED"
-    }
-  }
-
-  // ------------------ 5️⃣ Role-based permission rules ------------------
-  if (userRole === "FACULTY") {
+  if (userRole === "FACULTY")
     throw createError({ statusCode: 403, message: "Faculty cannot create schedules." })
-  }
 
   if (userRole === "DEAN") {
-    if (!userDepartmentId) {
+    if (scheduleDepartmentId !== userDepartmentId)
       throw createError({
         statusCode: 403,
-        message: "Dean has no department assigned."
+        message: "Dean can only schedule inside their own department."
       })
-    }
 
-    // Class must belong to dean's department
-    if (scheduleDepartmentId !== userDepartmentId) {
+    if (subjectRow.is_gened)
       throw createError({
         statusCode: 403,
-        message: "You can only schedule classes within your own department."
+        message: "Program deans cannot schedule GenEd subjects."
       })
-    }
 
-    // Subject must belong to dean's department
-    if (subjectRow.department_id !== userDepartmentId) {
+    if (subjectRow.department_id !== userDepartmentId)
       throw createError({
         statusCode: 403,
-        message: "You can only schedule subjects belonging to your department."
+        message: "Dean cannot schedule subjects from other departments."
       })
-    }
-
-    // Dean schedules MAJOR subjects only (no GenEd)
-    if (subjectRow.is_gened) {
-      throw createError({
-        statusCode: 403,
-        message: "Program deans cannot schedule GenEd subjects. Please coordinate with the GenEd dean."
-      })
-    }
   }
 
   if (userRole === "GENED") {
-    // GenEd dean can schedule ONLY GenEd subjects
-    if (!subjectRow.is_gened) {
+    if (!subjectRow.is_gened)
       throw createError({
         statusCode: 403,
         message: "GenEd dean can only schedule GenEd subjects."
       })
-    }
-    // Class can be from any department — allowed
   }
 
-  // ADMIN: no extra restrictions
+  // -----------------------------------------
+  // LOAD PERIODS
+  // -----------------------------------------
+  const { data: periodRows } = await supabase
+    .from("periods")
+    .select("id, slot_index")
 
-  // ------------------ 6️⃣ Conflict detection ------------------
-  const warnings: string[] = []
+  if (!periodRows || periodRows.length === 0)
+    throw createError({ statusCode: 500, message: "Periods not configured" })
 
-  // Helper to fetch existing schedules with slot_index ranges
-  async function fetchSchedules(filter: Record<string, any>) {
-    let req = supabase
+  const pStart = periodRows.find(p => p.id === period_start_id)
+  const pEnd = periodRows.find(p => p.id === period_end_id)
+
+  if (!pStart || !pEnd)
+    throw createError({ statusCode: 400, message: "Invalid period" })
+
+  const startSlot = Math.min(pStart.slot_index, pEnd.slot_index)
+  const endSlot = Math.max(pStart.slot_index, pEnd.slot_index)
+
+  // -----------------------------------------
+  // CONFLICT LOADER
+  // -----------------------------------------
+  async function loadConflicts(filter: any) {
+    let q = supabase
       .from("schedules")
       .select(`
         id,
         day,
-        is_deleted,
         period_start:period_start_id(slot_index),
         period_end:period_end_id(slot_index)
       `)
+      .eq("day", day)
       .eq("academic_term_id", academic_term_id)
       .eq("is_deleted", false)
-      .eq("day", day)
 
-    for (const [key, value] of Object.entries(filter)) {
-      req = req.eq(key, value)
-    }
+    for (const [k, v] of Object.entries(filter)) q = q.eq(k, v)
 
-    const { data, error } = await req
-    if (error) {
-      throw createError({ statusCode: 500, message: error.message })
-    }
-    return data || []
+    const { data } = await q
+    return (data || []) as any[]
   }
 
-  // 6.1 Class conflicts → always BLOCK
-  const classSchedules = await fetchSchedules({ class_id })
-  for (const s of classSchedules as any[]) {
-    const sStart = s.period_start?.slot_index
-    const sEnd = s.period_end?.slot_index
-    if (sStart == null || sEnd == null) continue
-    if (rangesOverlap(startSlot, endSlot, sStart, sEnd)) {
-      throw createError({
-        statusCode: 409,
-        message: "This class already has a schedule at the selected time.",
-        data: {
-          type: "CLASS_CONFLICT",
-          schedule_id: s.id
-        } as any
-      })
-    }
+  // -----------------------------------------
+  // HARD: CLASS CONFLICT
+  // -----------------------------------------
+  const classConflicts = await loadConflicts({ class_id })
+  for (const c of classConflicts) {
+    const cs = (c.period_start as any)?.slot_index
+    const ce = (c.period_end as any)?.slot_index
+
+    if (overlap(startSlot, endSlot, cs, ce))
+      throw createError({ statusCode: 409, message: "Class conflict" })
   }
 
-  // 6.2 Faculty conflicts → soft-flex
-  let teacherConflicts: any[] = []
+  // -----------------------------------------
+  // SOFT: FACULTY CONFLICT
+  // -----------------------------------------
+  let facultyConflicts: any[] = []
   if (faculty_id) {
-    teacherConflicts = await fetchSchedules({ faculty_id })
-    teacherConflicts = (teacherConflicts as any[]).filter((s) => {
-      const sStart = s.period_start?.slot_index
-      const sEnd = s.period_end?.slot_index
-      if (sStart == null || sEnd == null) return false
-      return rangesOverlap(startSlot, endSlot, sStart, sEnd)
-    })
+    const fc = await loadConflicts({ faculty_id })
+    facultyConflicts = fc.filter(c =>
+      overlap(startSlot, endSlot,
+        (c.period_start as any)?.slot_index,
+        (c.period_end as any)?.slot_index
+      )
+    )
 
-    if (teacherConflicts.length > 0 && !force) {
-      throw createError({
-        statusCode: 409,
-        message: "Teacher is already booked at this time.",
-        data: {
-          type: "FACULTY_CONFLICT",
-          conflicts: teacherConflicts.map((c) => c.id)
-        } as any
-      })
-    }
-
-    if (teacherConflicts.length > 0 && force) {
-      warnings.push("Teacher is already booked at this time.")
-    }
+    if (facultyConflicts.length && !force)
+      throw createError({ statusCode: 409, message: "Faculty conflict" })
   }
 
-  // 6.3 Room conflicts → soft-flex
+  // -----------------------------------------
+  // SOFT: ROOM CONFLICT
+  // -----------------------------------------
   let roomConflicts: any[] = []
   if (room_id) {
-    roomConflicts = await fetchSchedules({ room_id })
-    roomConflicts = (roomConflicts as any[]).filter((s) => {
-      const sStart = s.period_start?.slot_index
-      const sEnd = s.period_end?.slot_index
-      if (sStart == null || sEnd == null) return false
-      return rangesOverlap(startSlot, endSlot, sStart, sEnd)
-    })
+    const rc = await loadConflicts({ room_id })
+    roomConflicts = rc.filter(c =>
+      overlap(startSlot, endSlot,
+        (c.period_start as any)?.slot_index,
+        (c.period_end as any)?.slot_index
+      )
+    )
 
-    if (roomConflicts.length > 0 && !force) {
-      throw createError({
-        statusCode: 409,
-        message: "Room is already used at this time.",
-        data: {
-          type: "ROOM_CONFLICT",
-          conflicts: roomConflicts.map((c) => c.id)
-        } as any
-      })
-    }
-
-    if (roomConflicts.length > 0 && force) {
-      warnings.push("Room is already used at this time.")
-    }
+    if (roomConflicts.length && !force)
+      throw createError({ statusCode: 409, message: "Room conflict" })
   }
 
-  // ------------------ 7️⃣ Insert schedule ------------------
+  // -----------------------------------------
+  // INSERT SCHEDULE
+  // -----------------------------------------
+  const now = new Date().toISOString()
+
   const schedulePayload = {
     class_id,
     subject_id,
     faculty_id: faculty_id || null,
     room_id: room_id || null,
-    department_id: scheduleDepartmentId,
+    day,
     period_start_id,
     period_end_id,
-    day,
-    mode: mode || "F2F",
     academic_term_id,
-    status: "PUBLISHED",
+    department_id: scheduleDepartmentId,
+    mode,
     is_deleted: false,
-    created_by: actorId
+    status: "PUBLISHED",
+    created_by: userRecord.id,
+    created_at: now,
+    updated_at: now
   }
 
-  const { data: insertedRows, error: insertErr } = await supabase
+  const { data: inserted, error: insertErr } = await supabase
     .from("schedules")
     .insert(schedulePayload)
     .select("*")
     .maybeSingle()
 
-  if (insertErr || !insertedRows) {
+  if (insertErr || !inserted)
     throw createError({
       statusCode: 500,
-      message: insertErr?.message || "Failed to create schedule."
+      message: insertErr?.message || "Insert failed"
     })
+
+  // -----------------------------------------
+  // EXPAND schedule_periods
+  // -----------------------------------------
+  const expand = periodRows
+    .filter(p => p.slot_index >= startSlot && p.slot_index <= endSlot)
+    .map(p => ({
+      schedule_id: inserted.id,
+      day,
+      period_id: p.id
+    }))
+
+  if (expand.length) {
+    const { error: e2 } = await supabase
+      .from("schedule_periods")
+      .insert(expand)
+    if (e2) throw createError({ statusCode: 500, message: e2.message })
   }
 
-  const newSchedule = insertedRows
-
-  // ------------------ 8️⃣ Write schedule_history (CREATE) ------------------
+  // -----------------------------------------
+  // HISTORY
+  // -----------------------------------------
   await supabase.from("schedule_history").insert({
-    schedule_id: newSchedule.id,
+    schedule_id: inserted.id,
     action: "CREATE",
     old_data: null,
-    new_data: newSchedule,
-    performed_by: actorId
+    new_data: inserted,
+    performed_by: userRecord.id
   })
 
-  // ------------------ 9️⃣ UNDO support (10 seconds via created_at check later) ------------------
-  // We simply return the id; undo endpoint will check created_at window.
   return {
     success: true,
-    schedule: newSchedule,
-    warnings,
-    undo_id: newSchedule.id
+    schedule: inserted,
+    faculty_conflict_ignored: facultyConflicts.length > 0 && force,
+    room_conflict_ignored: roomConflicts.length > 0 && force,
+    undo_id: inserted.id
   }
 })

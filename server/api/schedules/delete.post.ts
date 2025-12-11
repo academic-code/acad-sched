@@ -1,52 +1,87 @@
 // server/api/schedules/delete.post.ts
 import { readBody, createError } from "h3"
+import { extractBearerToken, getAppUserRecord } from "./_helpers"
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
   const body = await readBody<{ id?: string }>(event)
 
-  const id = body.id
-  if (!id) {
-    throw createError({ statusCode: 400, message: "Missing schedule ID." })
-  }
+  const scheduleId = body?.id
+  if (!scheduleId)
+    throw createError({ statusCode: 400, message: "Schedule ID is required." })
 
-  const nowIso = new Date().toISOString()
+  // ------------------------- AUTH -------------------------
+  const token = extractBearerToken(event)
+  if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
 
-  const { data: oldRow, error: loadErr } = await supabase
+  const { userRecord } = await getAppUserRecord(supabase, token)
+  const userRole = (userRecord.role || "").toUpperCase()
+  const userDepartmentId = userRecord.department_id
+
+  // ------------------------- LOAD SCHEDULE -------------------------
+  const { data: scheduleRow, error: loadErr } = await supabase
     .from("schedules")
     .select("*")
-    .eq("id", id)
+    .eq("id", scheduleId)
     .maybeSingle()
 
-  if (loadErr || !oldRow) {
+  if (loadErr || !scheduleRow)
     throw createError({ statusCode: 404, message: "Schedule not found." })
+
+  // ------------------------- PERMISSIONS -------------------------
+  if (userRole === "FACULTY")
+    throw createError({ statusCode: 403, message: "Faculty cannot delete schedules." })
+
+  if (userRole === "DEAN") {
+    if (!userDepartmentId)
+      throw createError({ statusCode: 403, message: "Dean has no department assigned." })
+
+    if (scheduleRow.department_id !== userDepartmentId)
+      throw createError({
+        statusCode: 403,
+        message: "Dean can only delete schedules inside own department."
+      })
   }
 
-  const { error } = await supabase
+  if (userRole === "GENED") {
+    const { data: subj } = await supabase
+      .from("subjects")
+      .select("is_gened")
+      .eq("id", scheduleRow.subject_id)
+      .maybeSingle()
+
+    if (!subj?.is_gened)
+      throw createError({
+        statusCode: 403,
+        message: "GenEd dean can only delete GenEd schedules."
+      })
+  }
+
+  // ------------------------- SOFT DELETE -------------------------
+  const nowIso = new Date().toISOString()
+
+  const { error: delErr } = await supabase
     .from("schedules")
-    .update({
-      is_deleted: true,
-      updated_at: nowIso
-    })
-    .eq("id", id)
+    .update({ is_deleted: true, updated_at: nowIso })
+    .eq("id", scheduleId)
 
-  if (error) {
-    throw createError({ statusCode: 500, message: error.message })
-  }
+  if (delErr)
+    throw createError({ statusCode: 500, message: delErr.message })
 
+  // ------------------------- HISTORY -------------------------
   await supabase.from("schedule_history").insert({
-    schedule_id: id,
+    schedule_id: scheduleId,
     action: "DELETE",
-    old_data: oldRow,
+    old_data: scheduleRow,
     new_data: null,
-    performed_by: null, // optional: fill with actor like in save.post if you want
+    performed_by: userRecord.id,
     performed_at: nowIso
   })
 
   return {
     success: true,
-    id,
+    id: scheduleId,
     undoAvailable: true,
-    expiresIn: 10 // seconds
+    message: "Schedule deleted."
   }
 })

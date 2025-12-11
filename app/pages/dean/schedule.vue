@@ -123,8 +123,7 @@
   :rooms="rooms"
   :days="days"
   :lock-day="drawerLockDay"
-  :lock-time="drawerLockTime"
-  :current-term-id="selectedTermId"               
+  :lock-time="drawerLockTime"              
   :current-term-semester="currentTermSemester"     
   @save="handleDrawerSave"
 />

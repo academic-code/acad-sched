@@ -1,76 +1,84 @@
 // server/api/schedules/undo.post.ts
 import { readBody, createError } from "h3"
-
-type UndoBody = {
-  id: string
-}
+import { extractBearerToken, getAppUserRecord } from "./_helpers"
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
-  const body = await readBody<UndoBody>(event)
+  const body = await readBody<{ id?: string }>(event)
 
-  const { id } = body
+  const id = body?.id
   if (!id) {
-    throw createError({ statusCode: 400, message: "id is required." })
+    throw createError({ statusCode: 400, message: "Undo ID is required." })
   }
 
-  // 1️⃣ Auth (just to be safe)
-  const authHeader = event.node.req.headers.authorization
-  const token = authHeader?.replace("Bearer ", "") ?? null
-  if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
-
-  const { data: authData, error: authError } = await supabase.auth.getUser(token)
-  if (authError || !authData?.user) {
-    throw createError({ statusCode: 401, message: "Unauthorized." })
+  // ------------------------- AUTH -------------------------
+  const token = extractBearerToken(event)
+  if (!token) {
+    throw createError({ statusCode: 401, message: "Missing auth token." })
   }
 
-  // 2️⃣ Load schedule
-  const { data: schedule, error: scheduleErr } = await supabase
+  await getAppUserRecord(supabase, token)
+
+  // ------------------------- LOAD SCHEDULE -------------------------
+  const { data: scheduleRow, error: scheduleErr } = await supabase
     .from("schedules")
-    .select("*")
+    .select("id, created_at, is_deleted")
     .eq("id", id)
     .maybeSingle()
 
-  if (scheduleErr || !schedule) {
+  if (scheduleErr || !scheduleRow) {
     throw createError({ statusCode: 404, message: "Schedule not found." })
   }
 
-  if (schedule.is_deleted) {
-    throw createError({ statusCode: 400, message: "Schedule already deleted." })
-  }
-
-  // 3️⃣ Enforce 10-second window based on created_at
-  const createdAt = new Date(schedule.created_at)
-  const now = new Date()
-  const diffMs = now.getTime() - createdAt.getTime()
-
-  if (diffMs > 10_000) {
+  // Already deleted → nothing to undo
+  if (scheduleRow.is_deleted) {
     throw createError({
       statusCode: 400,
-      message: "Undo window expired. (More than 10 seconds since creation.)"
+      message: "Schedule already deleted. Nothing to undo."
     })
   }
 
-  // 4️⃣ Soft delete schedule
-  const { error: updateErr } = await supabase
-    .from("schedules")
-    .update({ is_deleted: true })
-    .eq("id", id)
+  // ------------------------- UNDO TIME WINDOW -------------------------
+  const createdAtMs = new Date(scheduleRow.created_at).getTime()
+  const nowMs = Date.now()
 
-  if (updateErr) {
-    throw createError({ statusCode: 500, message: updateErr.message })
+  // You may change this (default: 10 seconds)
+  const UNDO_WINDOW_MS = 10_000
+
+  if (nowMs - createdAtMs > UNDO_WINDOW_MS) {
+    throw createError({
+      statusCode: 400,
+      message: "Undo window expired."
+    })
   }
 
-  // 5️⃣ Log in history
+  // ------------------------- MARK AS DELETED -------------------------
+  const { error: delErr } = await supabase
+    .from("schedules")
+    .update({
+      is_deleted: true,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", id)
+
+  if (delErr) {
+    throw createError({ statusCode: 500, message: delErr.message })
+  }
+
+  // ------------------------- WRITE HISTORY -------------------------
   await supabase.from("schedule_history").insert({
-    schedule_id: schedule.id,
+    schedule_id: id,
     action: "UNDO_CREATE",
-    old_data: schedule,
+    old_data: scheduleRow,
     new_data: null,
-    performed_by: null // optional: could look up user.id from users table
+    performed_by: null, // system-level undo
+    performed_at: new Date().toISOString()
   })
 
+  // ------------------------- RESPONSE -------------------------
   return {
-    success: true
+    success: true,
+    undone: true,
+    id
   }
 })

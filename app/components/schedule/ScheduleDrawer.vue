@@ -273,13 +273,14 @@ const facultySafe = computed(() => props.faculty ?? [])
 const periodsSafe = computed(() => props.periods ?? [])
 const roomsSafe = computed(() => props.rooms ?? [])
 const daysSafe = computed(() => props.days ?? [
-  { value: "MON", label: "Mon" },
-  { value: "TUE", label: "Tue" },
-  { value: "WED", label: "Wed" },
-  { value: "THU", label: "Thu" },
-  { value: "FRI", label: "Fri" },
-  { value: "SAT", label: "Sat" }
+  { value: "MONDAY", label: "Mon" },
+  { value: "TUESDAY", label: "Tue" },
+  { value: "WEDNESDAY", label: "Wed" },
+  { value: "THURSDAY", label: "Thu" },
+  { value: "FRIDAY", label: "Fri" },
+  { value: "SATURDAY", label: "Sat" }
 ])
+
 
 //
 // Labels

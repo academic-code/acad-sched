@@ -1,7 +1,6 @@
 import { defineStore } from "pinia"
 import { useSchedules } from "@/composables/useSchedules"
 
-// Types for strong typing
 export interface ScheduleRecord {
   id: string
   class_id: string
@@ -42,9 +41,6 @@ export const useScheduleStore = defineStore("scheduleStore", {
   },
 
   actions: {
-    // ---------------------------------------------------------
-    // Load schedules using B1 list.get.ts
-    // ---------------------------------------------------------
     async load(view: "CLASS" | "FACULTY" | "ROOM", target_id: string, academic_term_id: string) {
       try {
         this.loading = true
@@ -54,7 +50,6 @@ export const useScheduleStore = defineStore("scheduleStore", {
 
         const api = useSchedules()
         const data = await api.listSchedules(view, target_id, academic_term_id)
-
         this.schedules = Array.isArray(data) ? data : []
       } catch (err) {
         console.error("ScheduleStore.load error:", err)
@@ -63,64 +58,24 @@ export const useScheduleStore = defineStore("scheduleStore", {
       }
     },
 
-    // ---------------------------------------------------------
-    // CREATE (B3 save OR B4 create)
-    // ---------------------------------------------------------
-    async createSchedule(payload: any) {
-      const api = useSchedules()
-      const res = await api.createSchedule(payload)
-
-      // Refresh list immediately (perfect sync)
-      await this.load(this.view, this.target_id, this.academic_term_id)
-
-      return res
-    },
-
-    // ---------------------------------------------------------
-    // UPDATE (B5 update)
-    // ---------------------------------------------------------
-    async updateSchedule(payload: any) {
-      const api = useSchedules()
-      const res = await api.updateSchedule(payload)
-
-      await this.load(this.view, this.target_id, this.academic_term_id)
-
-      return res
-    },
-
-    // ---------------------------------------------------------
-    // SAVE (B3 unified CREATE+UPDATE)
-    // ---------------------------------------------------------
     async saveSchedule(payload: any) {
       const api = useSchedules()
       const res = await api.saveSchedule(payload)
-
       await this.load(this.view, this.target_id, this.academic_term_id)
-
       return res
     },
 
-    // ---------------------------------------------------------
-    // DELETE (B6 delete)
-    // ---------------------------------------------------------
     async deleteSchedule(id: string) {
       const api = useSchedules()
       const res = await api.deleteSchedule(id)
-
       await this.load(this.view, this.target_id, this.academic_term_id)
-
       return res
     },
 
-    // ---------------------------------------------------------
-    // UNDO (B7 undo)
-    // ---------------------------------------------------------
     async undoSchedule(id: string) {
       const api = useSchedules()
       const res = await api.undoSchedule(id)
-
       await this.load(this.view, this.target_id, this.academic_term_id)
-
       return res
     }
   }

@@ -1,39 +1,114 @@
 // FILE: server/api/schedules/list.get.ts
-import { getQuery, createError } from 'h3'
-import { extractBearerToken, getAppUserRecord } from './_helpers'
+
+import { getQuery, createError } from "h3"
+import {
+  extractBearerToken,
+  getAppUserRecord,
+  resolveNormalizedRole,
+  getFacultyRowByAuthUser,
+  normalizeDay,
+  formatScheduleForResponse
+} from "./_helpers"
 
 export default defineEventHandler(async (event) => {
   const supabase = globalThis.$supabase!
   const query = getQuery(event)
 
+  // ---------------- TOKEN / AUTH ----------------
   const token = extractBearerToken(event)
-  if (!token) throw createError({ statusCode: 401, message: 'Missing auth token.' })
+  if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
 
-  const { userRecord } = await getAppUserRecord(supabase, token)
-  let userRole = (userRecord.role || '').toUpperCase()
-  const userDepartmentId = userRecord.department_id
+  const { userRecord, authUser } = await getAppUserRecord(supabase, token)
+  const normalizedRole = await resolveNormalizedRole(supabase, userRecord)
+  const userDeptId = userRecord.department_id
 
-  // detect GENED dean
-  if (userRole === 'DEAN' && userDepartmentId) {
-    const { data: dept } = await supabase.from('departments').select('type').eq('id', userDepartmentId).maybeSingle()
-    if (dept?.type === 'GENED') userRole = 'GENED'
-  }
+  // Faculty mapping
+  const facultyRowOfCaller = await getFacultyRowByAuthUser(supabase, authUser.id)
+  const requesterFacultyId = facultyRowOfCaller?.id ?? null
 
-  const view = (query.view?.toString() || 'CLASS').toUpperCase()
-  const targetId = query.target_id?.toString() || ''
-  if (!targetId) throw createError({ statusCode: 400, message: 'target_id is required.' })
+  // ---------------- GET PARAMS ----------------
+  const view = (query.view?.toString() || "CLASS").toUpperCase()
+  const targetId = query.target_id?.toString()
+  if (!targetId) throw createError({ statusCode: 400, message: "target_id is required." })
 
-  // academic term - default to active
-  let academicTermId = query.academic_term_id?.toString() || ''
+  // academic term (default to active)
+  let academicTermId = query.academic_term_id?.toString() || ""
   if (!academicTermId) {
-    const { data: activeTerm } = await supabase.from('academic_terms').select('id').eq('is_active', true).maybeSingle()
-    if (!activeTerm) throw createError({ statusCode: 400, message: 'No active academic term found.' })
+    const { data: activeTerm, error: termErr } = await supabase
+      .from("academic_terms")
+      .select("id")
+      .eq("is_active", true)
+      .maybeSingle()
+
+    if (termErr) throw createError({ statusCode: 500, message: "Failed to load active term." })
+    if (!activeTerm) throw createError({ statusCode: 400, message: "No active academic term found." })
     academicTermId = activeTerm.id
   }
 
-  // Build request
+  // ---------------- ROLE-BASED ACCESS CONTROL ----------------
+
+  // FACULTY → may only view their own schedule
+  if (normalizedRole === "FACULTY") {
+    if (view !== "FACULTY" || targetId !== requesterFacultyId) {
+      throw createError({
+        statusCode: 403,
+        message: "Faculty can only view their own schedules."
+      })
+    }
+  }
+
+  // PROGRAM DEAN restrictions
+  if (normalizedRole === "DEAN") {
+    if (!userDeptId) throw createError({ statusCode: 403, message: "Dean has no department." })
+
+    if (view === "CLASS") {
+      const { data: cls, error: cErr } = await supabase
+        .from("classes")
+        .select("department_id")
+        .eq("id", targetId)
+        .maybeSingle()
+      if (cErr) throw createError({ statusCode: 500, message: "Failed to load class." })
+      if (!cls) throw createError({ statusCode: 404, message: "Class not found." })
+      if (cls.department_id !== userDeptId) {
+        throw createError({ statusCode: 403, message: "Dean can only view classes in their own department." })
+      }
+    }
+
+    if (view === "FACULTY") {
+      const { data: fac, error: fErr } = await supabase
+        .from("faculty")
+        .select("department_id")
+        .eq("id", targetId)
+        .maybeSingle()
+      if (fErr) throw createError({ statusCode: 500, message: "Failed to load faculty." })
+      if (!fac) throw createError({ statusCode: 404, message: "Faculty not found." })
+      if (fac.department_id !== userDeptId) {
+        throw createError({ statusCode: 403, message: "Dean can only view faculty in their own department." })
+      }
+    }
+
+    if (view === "ROOM") {
+      const { data: room, error: rErr } = await supabase
+        .from("rooms")
+        .select("department_id")
+        .eq("id", targetId)
+        .maybeSingle()
+      if (rErr) throw createError({ statusCode: 500, message: "Failed to load room." })
+      if (!room) throw createError({ statusCode: 404, message: "Room not found." })
+      if (room.department_id !== userDeptId) {
+        throw createError({
+          statusCode: 403,
+          message: "Dean can only view rooms inside their own department."
+        })
+      }
+    }
+  }
+
+  // GENED → full view allowed (Option B)
+
+  // ---------------- BUILD BASE QUERY ----------------
   let request = supabase
-    .from('schedules')
+    .from("schedules")
     .select(`
       id,
       class_id,
@@ -48,39 +123,81 @@ export default defineEventHandler(async (event) => {
       period_end_id,
       is_deleted,
 
-      class:classes(id, class_name, section, year_level_label, program_name),
-      subject:subjects(id, course_code, description, is_gened),
-      faculty:faculty(id, first_name, last_name),
-      room:rooms(id, name),
+      class:classes(
+        id,
+        class_name,
+        section,
+        year_level_label,
+        program_name
+      ),
 
-      period_start:periods!schedules_period_start_id_fkey(id, slot_index, start_time, end_time),
-      period_end:periods!schedules_period_end_id_fkey(id, slot_index, start_time, end_time)
+      subject:subjects(
+        id,
+        course_code,
+        description,
+        units,
+        is_gened,
+        department_id
+      ),
+
+      faculty:faculty(
+        id,
+        first_name,
+        last_name
+      ),
+
+      room:rooms(
+        id,
+        name
+      ),
+
+      period_start:periods!schedules_period_start_id_fkey(
+        id,
+        slot_index,
+        start_time,
+        end_time
+      ),
+
+      period_end:periods!schedules_period_end_id_fkey(
+        id,
+        slot_index,
+        start_time,
+        end_time
+      )
     `)
-    .eq('academic_term_id', academicTermId)
-    .eq('is_deleted', false)
+    .eq("academic_term_id", academicTermId)
+    .eq("is_deleted", false)
 
-  if (view === 'CLASS') request = request.eq('class_id', targetId)
-  else if (view === 'FACULTY') request = request.eq('faculty_id', targetId)
-  else if (view === 'ROOM') request = request.eq('room_id', targetId)
-  else throw createError({ statusCode: 400, message: 'Invalid view type.' })
+  // ---------------- APPLY VIEW FILTER ----------------
+  if (view === "CLASS") request = request.eq("class_id", targetId)
+  else if (view === "FACULTY") request = request.eq("faculty_id", targetId)
+  else if (view === "ROOM") request = request.eq("room_id", targetId)
+  else throw createError({ statusCode: 400, message: "Invalid view type." })
 
-  if (userRole === 'FACULTY') {
-    if (view !== 'FACULTY' || targetId !== userRecord.id) {
-      throw createError({ statusCode: 403, message: 'Faculty can only view their own schedules.' })
-    }
+  // PROGRAM DEAN → final filtering by department_id
+  if (normalizedRole === "DEAN") {
+    request = request.eq("department_id", userDeptId)
   }
 
-  if (userRole === 'DEAN') {
-    if (!userDepartmentId) throw createError({ statusCode: 403, message: 'Dean has no department.' })
-    request = request.eq('department_id', userDepartmentId)
-  }
+  // GENED → no extra restriction (view-only full access)
 
-  const { data, error } = await request.order('day', { ascending: true }).order('period_start.slot_index', { ascending: true })
+  // ---------------- EXECUTE QUERY ----------------
+  const { data, error } = await request
+    .order("day", { ascending: true })
+    .order("period_start.slot_index", { ascending: true })
 
   if (error) {
-    console.error('schedules.list error:', error)
+    console.error("schedules.list error:", error)
     throw createError({ statusCode: 500, message: error.message })
   }
 
-  return (data || []).map((r: any) => ({ ...r }))
+  // ---------------- FORMAT RESPONSE ----------------
+  const rows = (data || []).map((row) =>
+    formatScheduleForResponse(normalizedRole, userRecord, {
+      ...row,
+      day: normalizeDay(row.day)
+    })
+  )
+
+  return rows
 })

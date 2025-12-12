@@ -8,264 +8,356 @@ import {
 } from "./_helpers"
 import { ConflictEngine } from "./conflict-engine"
 
+type SupabaseClientLike = any
+
 export default defineEventHandler(async (event) => {
-  const supabase = globalThis.$supabase!
-  const body = await readBody<any>(event)
+  const supabase: SupabaseClientLike = globalThis.$supabase!
 
-  const {
-    id,
-    class_id,
-    subject_id,
-    faculty_id = null,
-    room_id = null,
-    day,
-    period_start_id,
-    period_end_id,
-    academic_term_id: termFromClient,
-    mode = "F2F",
-    force = false
-  } = body || {}
+  try {
+    const body = await readBody<Record<string, any>>(event)
 
-  if (!class_id) throw createError({ statusCode: 400, message: "class_id is required." })
-  if (!subject_id) throw createError({ statusCode: 400, message: "subject_id is required." })
-  if (!day) throw createError({ statusCode: 400, message: "day is required." })
-  if (!period_start_id || !period_end_id) {
-    throw createError({ statusCode: 400, message: "period_start_id and period_end_id are required." })
-  }
+    // ----------------- Normalize & Validate payload -----------------
+    const payload = {
+      id: body?.id ?? undefined,
+      class_id: body?.class_id ?? null,
+      subject_id: body?.subject_id ?? null,
+      faculty_id: body?.faculty_id ?? null,
+      room_id: body?.room_id ?? null,
+      day: body?.day ?? null,
+      period_start_id: body?.period_start_id ?? null,
+      period_end_id: body?.period_end_id ?? null,
+      academic_term_id: body?.academic_term_id ?? null,
+      mode: (body?.mode ?? "F2F") as string,
+      force: Boolean(body?.force === true || body?.force === "true")
+    }
 
-  if (room_id && String(mode).toUpperCase() !== "F2F") {
-    throw createError({ statusCode: 400, message: "Rooms are only allowed for F2F mode." })
-  }
+    if (!payload.class_id) throw createError({ statusCode: 400, message: "class_id is required." })
+    if (!payload.subject_id) throw createError({ statusCode: 400, message: "subject_id is required." })
+    if (!payload.day) throw createError({ statusCode: 400, message: "day is required." })
+    if (!payload.period_start_id) throw createError({ statusCode: 400, message: "period_start_id is required." })
+    if (!payload.period_end_id) throw createError({ statusCode: 400, message: "period_end_id is required." })
+    if (!payload.academic_term_id) throw createError({ statusCode: 400, message: "academic_term_id is required." })
 
-  // normalize day once (ScheduleDay)
-  const normalizedDay = normalizeDay(day || "")
+    const normalizedDay = normalizeDay(payload.day)
 
-  // AUTH
-  const token = extractBearerToken(event)
-  if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
+    // ----------------- AUTH -----------------
+    const token = extractBearerToken(event)
+    if (!token) throw createError({ statusCode: 401, message: "Missing auth token." })
 
-  const { userRecord, authUser } = await getAppUserRecord(supabase, token)
-  const normalizedRole = await resolveNormalizedRole(supabase, userRecord)
-  const actorId = userRecord.id
-  const userDeptId = userRecord.department_id
+    const { userRecord, authUser } = await getAppUserRecord(supabase, token)
+    const normalizedRole = await resolveNormalizedRole(supabase, userRecord)
+    const roleUpper = (normalizedRole || "").toString().toUpperCase()
+    const userDeptId = userRecord?.department_id ?? null
 
-  // Load class
-  const { data: classRow, error: classErr } = await supabase
-    .from("classes")
-    .select("id, department_id, academic_term_id")
-    .eq("id", class_id)
-    .maybeSingle()
+    // Quick reject: faculty role cannot create/modify schedules
+    if (roleUpper === "FACULTY") {
+      throw createError({ statusCode: 403, message: "Faculty cannot create or modify schedules." })
+    }
 
-  if (classErr) throw createError({ statusCode: 500, message: classErr.message })
-  if (!classRow) throw createError({ statusCode: 404, message: "Class not found." })
+    // ----------------- Load referenced rows -----------------
+    // Class row (useful for department, but in A2 SUBJECT dept governs assignment)
+    const { data: classRow, error: classErr } = await supabase
+      .from("classes")
+      .select("id, department_id, academic_term_id")
+      .eq("id", payload.class_id)
+      .maybeSingle()
+    if (classErr) throw createError({ statusCode: 500, message: classErr.message })
+    if (!classRow) throw createError({ statusCode: 404, message: "Class not found." })
 
-  const scheduleDepartmentId = classRow.department_id
-  const academic_term_id = termFromClient || classRow.academic_term_id
-  if (!academic_term_id) {
-    throw createError({ statusCode: 400, message: "academic_term_id missing (no class term fallback)." })
-  }
+    // Subject row — crucial for A2 (subject.department_id)
+    const { data: subjectRow, error: subjErr } = await supabase
+      .from("subjects")
+      .select("id, department_id, is_gened, year_level_number, semester")
+      .eq("id", payload.subject_id)
+      .maybeSingle()
+    if (subjErr) throw createError({ statusCode: 500, message: subjErr.message })
+    if (!subjectRow) throw createError({ statusCode: 404, message: "Subject not found." })
 
-  // Load subject
-  const { data: subjectRow, error: subjErr } = await supabase
-    .from("subjects")
-    .select("id, department_id, is_gened")
-    .eq("id", subject_id)
-    .maybeSingle()
+    // If faculty_id provided, load faculty row to validate department & active state
+    let facultyRow: any = null
+    if (payload.faculty_id) {
+      const { data: f, error: fErr } = await supabase
+        .from("faculty")
+        .select("id, department_id, is_active")
+        .eq("id", payload.faculty_id)
+        .maybeSingle()
+      if (fErr) throw createError({ statusCode: 500, message: fErr.message })
+      if (!f) throw createError({ statusCode: 404, message: "Faculty not found." })
+      facultyRow = f
+    }
 
-  if (subjErr) throw createError({ statusCode: 500, message: subjErr.message })
-  if (!subjectRow) throw createError({ statusCode: 404, message: "Subject not found." })
+    // Room if provided
+    let roomRow: any = null
+    if (payload.room_id) {
+      const { data: r, error: rErr } = await supabase
+        .from("rooms")
+        .select("id, department_id, room_sharing")
+        .eq("id", payload.room_id)
+        .maybeSingle()
+      if (rErr) throw createError({ statusCode: 500, message: rErr.message })
+      if (!r) throw createError({ statusCode: 404, message: "Room not found." })
+      roomRow = r
+    }
 
-  // Permission rules
-  if (normalizedRole === "ADMIN") throw createError({ statusCode: 403, message: "Admins cannot modify schedules." })
-  if (normalizedRole === "FACULTY") throw createError({ statusCode: 403, message: "Faculty cannot modify schedules." })
+    // Academic term check — avoid selecting academic_year to prevent prior error.
+    const { data: termRow, error: termErr } = await supabase
+      .from("academic_terms")
+      .select("id, semester, label, is_active")
+      .eq("id", payload.academic_term_id)
+      .maybeSingle()
+    if (termErr) throw createError({ statusCode: 500, message: termErr.message })
+    if (!termRow) throw createError({ statusCode: 400, message: "Academic term not found." })
 
-  if (normalizedRole === "DEAN") {
-    if (!userDeptId) throw createError({ statusCode: 403, message: "Dean has no department." })
-    if (scheduleDepartmentId !== userDeptId) throw createError({ statusCode: 403, message: "Dean can only schedule for classes in their department." })
-    if (subjectRow.is_gened) throw createError({ statusCode: 403, message: "Program Deans cannot schedule GenEd subjects." })
-    if (subjectRow.department_id !== userDeptId) throw createError({ statusCode: 403, message: "Dean can only schedule subjects from their department." })
-  }
+    // ----------------- Role-specific permission checks (A2) -----------------
+    // A2: Dean may assign only if the SUBJECT belongs to their department AND faculty (if provided) matches the SUBJECT's department.
+    const subjectDeptId = subjectRow.department_id ?? null
+    const isGenedSubject = Boolean(subjectRow?.is_gened)
 
-  if (normalizedRole === "GENED") {
-    if (!subjectRow.is_gened) throw createError({ statusCode: 403, message: "GenEd dean can only schedule GenEd subjects." })
-  }
+    if (roleUpper === "DEAN") {
+      if (!userDeptId) throw createError({ statusCode: 403, message: "Dean has no department." })
 
-  // ROOM sharing policy
-  const conflictEngine = new ConflictEngine(supabase)
+      // Dean must be of the same department as the SUBJECT (A2)
+      if (String(userDeptId) !== String(subjectDeptId)) {
+        throw createError({ statusCode: 403, message: "Dean can only create schedules for subjects in their own department." })
+      }
 
-  if (room_id) {
-    const roomPolicyCheck = await conflictEngine.validateRoomSharingPolicy({
-      room_id,
-      day: normalizedDay,
-      period_start_id,
-      period_end_id,
-      academic_term_id,
-      excludeScheduleId: id ?? null
-    })
+      // Deans cannot create GenEd schedules (GenEd dean handles GenEd)
+      if (isGenedSubject) {
+        throw createError({ statusCode: 403, message: "Deans cannot create GenEd schedules." })
+      }
 
-    if (!roomPolicyCheck.ok && !force) {
-      return {
-        conflict: true,
-        type: "ROOM_PRIVATE",
-        message: "Room is PRIVATE and already booked.",
-        room_conflicts: roomPolicyCheck.conflicts
+      // If room provided, ensure room belongs to the dean's department (subject's dept == dean's dept)
+      if (roomRow && String(roomRow.department_id) !== String(userDeptId)) {
+        throw createError({ statusCode: 403, message: "Dean can only assign rooms from their own department." })
       }
     }
-  }
 
-  // Full conflict detection
-  const conflicts = await conflictEngine.findConflicts({
-    class_id,
-    faculty_id,
-    room_id,
-    day: normalizedDay,
-    period_start_id,
-    period_end_id,
-    academic_term_id,
-    excludeScheduleId: id ?? null
-  })
-
-  if (conflicts.hard.length > 0 && !force) {
-    return {
-      conflict: true,
-      type: "HARD",
-      class_conflicts: conflicts.classConflicts,
-      room_conflicts: conflicts.roomConflicts,
-      faculty_conflicts: conflicts.facultyConflicts,
-      message: "⛔ Hard conflict — requires force=true"
+    if (roleUpper === "GENED") {
+      // GenEd dean may only create schedules for GenEd subjects
+      if (!isGenedSubject) throw createError({ statusCode: 403, message: "GenEd dean can only create schedules for GenEd subjects." })
     }
-  }
 
-  if (conflicts.soft.length > 0 && !force) {
-    return {
-      conflict: true,
-      type: "SOFT",
-      faculty_conflicts: conflicts.facultyConflicts,
-      message: "👩‍🏫 Faculty conflict — set force=true to replace."
+    // ADMIN: no department restrictions
+
+    // Faculty assignment validation (A2 rules)
+    if (facultyRow) {
+      // Faculty must be active
+      if (facultyRow.is_active === false) {
+        throw createError({ statusCode: 403, message: "Cannot assign an inactive faculty." })
+      }
+
+      // Faculty must belong to the SUBJECT's department (A2)
+      if (String(facultyRow.department_id) !== String(subjectDeptId)) {
+        throw createError({ statusCode: 403, message: "Assigned faculty must belong to the subject's department." })
+      }
+
+      // Additionally: If requester is DEAN and DEAN's dept != subject dept we've already blocked above.
+      // If requester is DEAN and facultyRow.department_id matches subjectDept, this is allowed.
     }
-  }
 
-  // Force delete if forced
-  if (force) {
-    const toDelete = [
-      ...conflicts.roomConflicts.map(c => c.id),
-      ...conflicts.facultyConflicts.map(c => c.id)
+    // ----------------- Prepare conflict engine & slot checks -----------------
+    const conflictEngine = new ConflictEngine(supabase)
+    const slotMap = await conflictEngine.loadSlotMap()
+    const startIndex = slotMap.get(String(payload.period_start_id))
+    const endIndex = slotMap.get(String(payload.period_end_id))
+    if (startIndex == null || endIndex == null) throw createError({ statusCode: 400, message: "Invalid period_start_id or period_end_id." })
+
+    // ----------------- Conflict detection -----------------
+    const conflicts = await conflictEngine.findConflicts({
+      class_id: payload.class_id,
+      faculty_id: payload.faculty_id ?? null,
+      room_id: payload.room_id ?? null,
+      day: normalizedDay,
+      period_start_id: payload.period_start_id,
+      period_end_id: payload.period_end_id,
+      academic_term_id: payload.academic_term_id,
+      excludeScheduleId: payload.id ?? null
+    })
+
+    const hardConflictIds = [
+      ...(conflicts.classConflicts ?? []).map((r: any) => r.id),
+      ...(conflicts.roomConflicts ?? []).map((r: any) => r.id)
     ]
+    const softConflictIds = (conflicts.facultyConflicts ?? []).map((r: any) => r.id)
 
-    if (toDelete.length > 0) {
-      await conflictEngine.softDeleteConflicts(toDelete, actorId)
-      await supabase.from("schedule_periods").delete().in("schedule_id", toDelete)
+    if ((hardConflictIds.length > 0 || softConflictIds.length > 0) && !payload.force) {
+      // Return conflict details so caller can decide whether to force
+      return {
+        success: false,
+        requires_force: true,
+        message: "Conflicts detected.",
+        conflicts: {
+          hard: hardConflictIds,
+          soft: softConflictIds,
+          details: {
+            classConflicts: conflicts.classConflicts,
+            facultyConflicts: conflicts.facultyConflicts,
+            roomConflicts: conflicts.roomConflicts
+          }
+        }
+      }
     }
-  }
 
-  // Insert or update
-  const nowIso = new Date().toISOString()
-  let scheduleId = id
-  let oldSchedule = null
+    // If force === true, soft-delete hard conflicts so the new schedule can take slot
+    let replacedIds: string[] = []
+    if (payload.force && hardConflictIds.length > 0) {
+      const softDelResult = await conflictEngine.softDeleteConflicts(hardConflictIds, userRecord?.id ?? null)
+      if (softDelResult?.deletedIds) replacedIds = softDelResult.deletedIds
+    }
 
-  if (id) {
-    const { data: oldRow } = await supabase
-      .from("schedules")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle()
-    oldSchedule = oldRow
+    // ----------------- Insert or Update schedule -----------------
+    const nowIso = new Date().toISOString()
+    // department_id for schedule should be the SUBJECT's department (A2 authoritative)
+    const scheduleDeptId = subjectDeptId ?? classRow.department_id
 
-    const { error: updErr } = await supabase
-      .from("schedules")
-      .update({
-        class_id,
-        subject_id,
-        faculty_id,
-        room_id,
+    let newScheduleId: string | null = null
+    let oldScheduleRow: any = null
+
+    if (payload.id) {
+      // UPDATE flow
+      const { data: existing, error: loadErr } = await supabase
+        .from("schedules")
+        .select("*, subject:subjects(id, is_gened, department_id)")
+        .eq("id", payload.id)
+        .maybeSingle()
+      if (loadErr) throw createError({ statusCode: 500, message: loadErr.message })
+      if (!existing) throw createError({ statusCode: 404, message: "Schedule to update not found." })
+
+      oldScheduleRow = existing
+
+      // Permission checks on update:
+      if (roleUpper === "DEAN") {
+        // Dean can only modify schedules for subjects in their dept (A2)
+        if (String(scheduleDeptId) !== String(userDeptId)) {
+          throw createError({ statusCode: 403, message: "Dean cannot modify schedules outside their department." })
+        }
+      }
+      if (roleUpper === "GENED") {
+        if (!existing.subject?.is_gened) throw createError({ statusCode: 403, message: "GenEd dean can only modify GenEd schedules." })
+      }
+
+      const { error: updErr } = await supabase
+        .from("schedules")
+        .update({
+          class_id: payload.class_id,
+          subject_id: payload.subject_id,
+          faculty_id: payload.faculty_id ?? null,
+          room_id: payload.room_id ?? null,
+          department_id: scheduleDeptId,
+          period_start_id: payload.period_start_id,
+          period_end_id: payload.period_end_id,
+          day: normalizedDay,
+          mode: payload.mode,
+          academic_term_id: payload.academic_term_id,
+          updated_at: nowIso
+        })
+        .eq("id", payload.id)
+
+      if (updErr) throw createError({ statusCode: 500, message: updErr.message })
+      newScheduleId = payload.id
+    } else {
+      // CREATE flow
+      const insertPayload: Record<string, any> = {
+        class_id: payload.class_id,
+        subject_id: payload.subject_id,
+        faculty_id: payload.faculty_id ?? null,
+        room_id: payload.room_id ?? null,
+        department_id: scheduleDeptId,
+        period_start_id: payload.period_start_id,
+        period_end_id: payload.period_end_id,
         day: normalizedDay,
-        period_start_id,
-        period_end_id,
-        academic_term_id,
-        mode,
-        department_id: scheduleDepartmentId,
-        updated_at: nowIso
-      })
-      .eq("id", id)
-
-    if (updErr) throw createError({ statusCode: 500, message: updErr.message })
-  } else {
-    const { data: insertRow, error: insErr } = await supabase
-      .from("schedules")
-      .insert({
-        class_id,
-        subject_id,
-        faculty_id,
-        room_id,
-        day: normalizedDay,
-        period_start_id,
-        period_end_id,
-        academic_term_id,
-        mode,
-        department_id: scheduleDepartmentId,
-        status: "PUBLISHED",
-        is_deleted: false,
-        created_by: actorId,
+        mode: payload.mode,
+        academic_term_id: payload.academic_term_id,
+        created_by: userRecord?.id ?? null,
         created_at: nowIso,
         updated_at: nowIso
+      }
+
+      const { data: insData, error: insErr } = await supabase
+        .from("schedules")
+        .insert(insertPayload)
+        .select("id")
+        .maybeSingle()
+
+      if (insErr) throw createError({ statusCode: 500, message: insErr.message })
+      if (!insData?.id) throw createError({ statusCode: 500, message: "Failed to create schedule." })
+      newScheduleId = insData.id
+    }
+
+    // ----------------- Build schedule_periods rows (recreate) -----------------
+    try {
+      await supabase.from("schedule_periods").delete().eq("schedule_id", newScheduleId)
+    } catch (e) {
+      console.error("Warning: failed to cleanup existing schedule_periods", e)
+    }
+
+    const sIdx = slotMap.get(String(payload.period_start_id))!
+    const eIdx = slotMap.get(String(payload.period_end_id))!
+    const minIdx = Math.min(sIdx, eIdx)
+    const maxIdx = Math.max(sIdx, eIdx)
+
+    const { data: periodRows, error: periodFetchErr } = await supabase
+      .from("periods")
+      .select("id, slot_index")
+      .gte("slot_index", minIdx)
+      .lte("slot_index", maxIdx)
+      .order("slot_index", { ascending: true })
+
+    if (periodFetchErr) {
+      console.error("Failed to fetch period rows for schedule_periods:", periodFetchErr)
+    } else {
+      const inserts = (periodRows || []).map((p: any) => ({
+        schedule_id: newScheduleId,
+        day: normalizedDay,
+        period_id: p.id,
+        created_at: nowIso
+      }))
+      if (inserts.length > 0) {
+        const { error: spErr } = await supabase.from("schedule_periods").insert(inserts)
+        if (spErr) {
+          console.error("Failed to insert schedule_periods:", spErr)
+        }
+      }
+    }
+
+    // ----------------- Insert schedule_history entry -----------------
+    try {
+      await supabase.from("schedule_history").insert({
+        schedule_id: newScheduleId,
+        action: payload.id ? "UPDATE" : "CREATE",
+        old_data: oldScheduleRow ?? null,
+        new_data: {
+          id: newScheduleId,
+          class_id: payload.class_id,
+          subject_id: payload.subject_id,
+          faculty_id: payload.faculty_id ?? null,
+          room_id: payload.room_id ?? null,
+          department_id: scheduleDeptId,
+          period_start_id: payload.period_start_id,
+          period_end_id: payload.period_end_id,
+          day: normalizedDay,
+          mode: payload.mode,
+          academic_term_id: payload.academic_term_id
+        },
+        performed_by: userRecord?.id ?? null,
+        performed_at: nowIso
       })
-      .select("id")
-      .single()
+    } catch (e) {
+      console.error("Failed to insert schedule_history:", e)
+    }
 
-    if (insErr) throw createError({ statusCode: 500, message: insErr.message })
-    scheduleId = insertRow.id
-  }
-
-  if (!scheduleId) throw createError({ statusCode: 500, message: "Failed to save schedule." })
-
-  // Rebuild schedule_periods
-  await supabase.from("schedule_periods").delete().eq("schedule_id", scheduleId)
-
-  const slotMap = await conflictEngine.loadSlotMap()
-  const startSlot = slotMap.get(String(period_start_id))!
-  const endSlot = slotMap.get(String(period_end_id))!
-  const minSlot = Math.min(startSlot, endSlot)
-  const maxSlot = Math.max(startSlot, endSlot)
-
-  const periodIdsInRange: string[] = []
-  for (const [pid, slot] of slotMap.entries()) {
-    if (slot >= minSlot && slot <= maxSlot) periodIdsInRange.push(pid)
-  }
-
-  if (periodIdsInRange.length > 0) {
-    const batch = periodIdsInRange.map(pid => ({
-      schedule_id: scheduleId,
-      day: normalizedDay,
-      period_id: pid
-    }))
-    const { error: spErr } = await supabase.from("schedule_periods").insert(batch)
-    if (spErr) throw createError({ statusCode: 500, message: spErr.message })
-  }
-
-  // History
-  await supabase.from("schedule_history").insert({
-    schedule_id: scheduleId,
-    action: id ? "UPDATE" : "CREATE",
-    old_data: oldSchedule,
-    new_data: {
-      class_id,
-      subject_id,
-      faculty_id,
-      room_id,
-      day: normalizedDay,
-      period_start_id,
-      period_end_id,
-      academic_term_id,
-      mode,
-      department_id: scheduleDepartmentId
-    },
-    performed_by: actorId,
-    performed_at: nowIso
-  })
-
-  return {
-    success: true,
-    id: scheduleId,
-    replaced: force && (conflicts.hard.length > 0 || conflicts.soft.length > 0)
+    // ----------------- Return response -----------------
+    return {
+      success: true,
+      id: newScheduleId,
+      replaced_conflict_ids: replacedIds,
+      message: payload.id ? "Schedule updated." : "Schedule created.",
+      undo_id: newScheduleId
+    }
+  } catch (err: any) {
+    console.error("schedules.save ERROR:", err)
+    const msg = err?.message ?? "Server Error"
+    const code = err?.statusCode ?? 500
+    throw createError({ statusCode: code, message: msg })
   }
 })

@@ -1,5 +1,4 @@
-// FILE: server/api/schedules/by-room.get.ts
-
+// server/api/schedules/by-room.get.ts
 import { getQuery, createError } from "h3"
 import {
   extractBearerToken,
@@ -55,7 +54,7 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // GENED dean → full view allowed (Option B)
+  // GENED dean → full view allowed
 
   // ---------------- QUERY SCHEDULES ----------------
   const { data, error } = await supabase
@@ -118,9 +117,10 @@ export default defineEventHandler(async (event) => {
     .eq("academic_term_id", academic_term_id)
     .eq("is_deleted", false)
     .order("day", { ascending: true })
-    .order("period_start.slot_index", { ascending: true })
+    .order("period_start(slot_index)", { ascending: true })
 
   if (error) {
+    console.error("by-room.get error:", error)
     throw createError({ statusCode: 500, message: error.message })
   }
 

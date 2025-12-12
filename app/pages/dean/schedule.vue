@@ -17,6 +17,7 @@
             variant="outlined"
             hide-details
             style="min-width: 220px"
+            :loading="loadingTerms"
             @update:model-value="reloadSchedules"
           />
         </div>
@@ -48,6 +49,7 @@
             :placeholder="targetPlaceholder"
             hide-details
             style="min-width:260px"
+            :loading="loadingLists"
             @update:model-value="reloadSchedules"
           />
 
@@ -64,6 +66,7 @@
             :placeholder="targetPlaceholder"
             hide-details
             style="min-width:260px"
+            :loading="loadingLists"
             @update:model-value="reloadSchedules"
           />
 
@@ -80,6 +83,7 @@
             :placeholder="targetPlaceholder"
             hide-details
             style="min-width:220px"
+            :loading="loadingLists"
             @update:model-value="reloadSchedules"
           />
         </div>
@@ -100,7 +104,6 @@
     <!-- Calendar -->
     <ScheduleCalendar
       v-if="!requiresSelection"
-      :loading="loading"
       :days="days"
       :periods="periods"
       :events="events"
@@ -110,44 +113,32 @@
     />
 
     <!-- Drawer -->
-<ScheduleDrawer
-  v-model="drawerOpen"
-  :role="'DEAN'"
-  :mode="drawerMode"
-  :payload="drawerPayload"
-  :classes="classes"
-  :subjects="subjects"
-  :class-subjects="classSubjects"
-  :faculty="faculty"
-  :periods="periods"
-  :rooms="rooms"
-  :days="days"
-  :lock-day="drawerLockDay"
-  :lock-time="drawerLockTime"              
-  :current-term-semester="currentTermSemester"     
-  @save="handleDrawerSave"
-/>
+    <ScheduleDrawer
+      v-model="drawerOpen"
+      :role="'DEAN'"
+      :mode="drawerMode"
+      :payload="drawerPayload"
+      :classes="classes"
+      :subjects="subjects"
+      :class-subjects="classSubjects"
+      :faculty="faculty"
+      :periods="periods"
+      :rooms="rooms"
+      :days="days"
+      :lock-day="drawerLockDay"
+      :lock-time="drawerLockTime"
+      :current-term-semester="currentTermSemester"
+      :current-term-id="selectedTermIdSafe"
+      @save="handleDrawerSave"
+    />
 
-
-    <!-- Snackbar (server messages + conflicts) -->
-    <v-snackbar
-      v-model="snackbar.show"
-      location="bottom"
-      :timeout="snackbar.timeout"
-    >
+    <!-- Snackbar -->
+    <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
       {{ snackbar.message }}
 
       <template #actions>
-        <v-btn
-          v-if="snackbar.canUndo && snackbar.undoId"
-          variant="text"
-          @click="handleUndo"
-        >
-          UNDO
-        </v-btn>
-        <v-btn variant="text" @click="snackbar.show = false">
-          Close
-        </v-btn>
+        <v-btn v-if="snackbar.canUndo && snackbar.undoId" variant="text" @click="handleUndo">UNDO</v-btn>
+        <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
       </template>
     </v-snackbar>
   </div>
@@ -157,12 +148,18 @@
 import { ref, computed, onMounted } from "vue"
 import ScheduleCalendar from "~/components/schedule/ScheduleCalendar.vue"
 import ScheduleDrawer from "~/components/schedule/ScheduleDrawer.vue"
+import { useScheduleStore } from "@/stores/useScheduleStore"
 
 definePageMeta({ layout: "dean" })
+
+const scheduleStore = useScheduleStore()
 const { $supabase } = useNuxtApp()
 
 /* ------------------------ STATE ------------------------ */
+
 const loading = ref(false)
+const loadingTerms = ref(false)
+const loadingLists = ref(false)
 const saving = ref(false)
 
 const academicTerms = ref<any[]>([])
@@ -197,32 +194,27 @@ const snackbar = ref({
   timeout: 6000
 })
 
+const selectedTermIdSafe = computed<string | undefined>(() =>
+  selectedTermId.value ?? undefined
+)
+
 /* ------------------------ HELPERS ------------------------ */
-function formatTime12h(time: string | null | undefined): string {
+
+function formatTime12h(time?: string | null) {
   if (!time) return ""
-  const [rawH, rawM] = time.split(":")
-  const h = Number(rawH)
-  const hour12 = h % 12 || 12
-  return `${hour12}:${rawM} ${h >= 12 ? "PM" : "AM"}`
+  const [h, m = "00"] = time.split(":")
+  const hour = Number(h)
+  return `${hour % 12 || 12}:${m} ${hour >= 12 ? "PM" : "AM"}`
 }
 
 /* ------------------------ COMPUTED ------------------------ */
-const targetLabel = computed(
-  () =>
-    ({
-      CLASS: "Class",
-      FACULTY: "Faculty",
-      ROOM: "Room"
-    }[viewMode.value])
+
+const targetLabel = computed(() =>
+  ({ CLASS: "Class", FACULTY: "Faculty", ROOM: "Room" } as const)[viewMode.value]
 )
 
-const targetPlaceholder = computed(
-  () =>
-    ({
-      CLASS: "Select Class",
-      FACULTY: "Select Faculty",
-      ROOM: "Select Room"
-    }[viewMode.value])
+const targetPlaceholder = computed(() =>
+  ({ CLASS: "Select Class", FACULTY: "Select Faculty", ROOM: "Select Room" } as const)[viewMode.value]
 )
 
 const requiresSelection = computed(() => {
@@ -232,16 +224,16 @@ const requiresSelection = computed(() => {
 })
 
 const days = [
-  { value: "MON", label: "Mon" },
-  { value: "TUE", label: "Tue" },
-  { value: "WED", label: "Wed" },
-  { value: "THU", label: "Thu" },
-  { value: "FRI", label: "Fri" },
-  { value: "SAT", label: "Sat" }
+  { value: "MONDAY", label: "Mon" },
+  { value: "TUESDAY", label: "Tue" },
+  { value: "WEDNESDAY", label: "Wed" },
+  { value: "THURSDAY", label: "Thu" },
+  { value: "FRIDAY", label: "Fri" },
+  { value: "SATURDAY", label: "Sat" }
 ]
 
 const termOptions = computed(() =>
-  academicTerms.value.map((t) => ({
+  academicTerms.value.map(t => ({
     value: t.id,
     label: `${t.academic_year} - ${t.semester}${t.is_active ? " ⭐" : ""}`
   }))
@@ -249,73 +241,80 @@ const termOptions = computed(() =>
 
 const classOptions = computed(() =>
   classes.value
-    .filter((c) => c.academic_term_id === selectedTermId.value)
-    .map((c) => ({
+    .filter(c => c.academic_term_id === selectedTermId.value)
+    .map(c => ({
       value: c.id,
-      label: `${c.class_name} ${c.year_level_label} - ${c.section}`
+      label: `${c.class_name} ${c.year_level_label ?? ""} - ${c.section ?? ""}`.trim()
     }))
 )
 
 const facultyOptions = computed(() =>
-  faculty.value.map((f: any) => ({
+  faculty.value.map(f => ({
     value: f.id,
-    label: `${f.last_name}, ${f.first_name}`
+    label: `${f.last_name ?? ""}, ${f.first_name ?? ""}`
   }))
 )
 
 const roomOptions = computed(() =>
-  rooms.value.map((r: any) => ({
-    value: r.id,
-    label: r.name
-  }))
+  rooms.value.map(r => ({ value: r.id, label: r.name ?? "" }))
 )
 
 const currentTermSemester = computed(() => {
-  const t = academicTerms.value.find(x => x.id === selectedTermId.value)
-  return t?.semester || null
+  return academicTerms.value.find(t => t.id === selectedTermId.value)?.semester ?? null
 })
 
-
 /* ------------------------ LOADERS ------------------------ */
+
 async function loadAcademicTerms() {
-  const { data } = await $supabase.from("academic_terms").select("*")
-  academicTerms.value = data || []
-  selectedTermId.value = academicTerms.value.find((t) => t.is_active)?.id || null
+  loadingTerms.value = true
+  try {
+    const { data } = await $supabase.from("academic_terms").select("*")
+    academicTerms.value = data ?? []
+    selectedTermId.value =
+      academicTerms.value.find(t => t.is_active)?.id ??
+      academicTerms.value[0]?.id ??
+      null
+  } finally {
+    loadingTerms.value = false
+  }
 }
 
 async function loadLists() {
-  const {
-    data: { session }
-  } = await $supabase.auth.getSession()
-  const headers = { Authorization: `Bearer ${session?.access_token}` }
+  loadingLists.value = true
+  try {
+    const { data: { session } } = await $supabase.auth.getSession()
+    const headers = { Authorization: `Bearer ${session?.access_token}` }
 
-  classes.value = (await $fetch("/api/classes/list", { headers })) || []
-  subjects.value = (await $fetch("/api/subjects/list", { headers })) || []
-  classSubjects.value = (await $fetch("/api/class-subjects/list", { headers })) || []
+    const cls = await $fetch("/api/classes/list", { headers })
+    classes.value = Array.isArray(cls) ? cls : cls?.data ?? []
 
-  faculty.value = (await $supabase.from("faculty").select("*")).data || []
-  rooms.value = (await $supabase.from("rooms").select("*")).data || []
+    const subj = await $fetch("/api/subjects/list", { headers })
+    subjects.value = Array.isArray(subj) ? subj : subj?.data ?? []
 
-  const p =
-    (await $supabase
-      .from("periods")
-      .select("*")
-      .order("slot_index", { ascending: true })).data || []
+    const cs = await $fetch("/api/class-subjects/list", { headers })
+    classSubjects.value = Array.isArray(cs) ? cs : cs?.data ?? []
 
-  periods.value = p.map((r: any) => ({
-    ...r,
-    label: `${formatTime12h(r.start_time)} - ${formatTime12h(r.end_time)}`
-  }))
+    faculty.value = (await $supabase.from("faculty").select("*")).data ?? []
+    rooms.value = (await $supabase.from("rooms").select("*")).data ?? []
+
+    const p = (await $supabase.from("periods").select("*").order("slot_index")).data ?? []
+    periods.value = p.map(r => ({
+      id: String(r.id),
+      start_time: r.start_time ?? "",
+      end_time: r.end_time ?? "",
+      slot_index: r.slot_index ?? 0,
+      label: `${formatTime12h(r.start_time)} - ${formatTime12h(r.end_time)}`
+    }))
+  } finally {
+    loadingLists.value = false
+  }
 }
 
 async function loadSchedules() {
-  if (requiresSelection.value || !selectedTermId.value) return
-
-  const {
-    data: { session }
-  } = await $supabase.auth.getSession()
-
-  const headers = { Authorization: `Bearer ${session?.access_token}` }
+  if (requiresSelection.value || !selectedTermId.value) {
+    events.value = []
+    return
+  }
 
   const target_id =
     viewMode.value === "CLASS"
@@ -324,25 +323,23 @@ async function loadSchedules() {
       ? selectedFacultyId.value
       : selectedRoomId.value
 
-  if (!target_id) return
+  if (!target_id) {
+    events.value = []
+    return
+  }
 
   loading.value = true
-
   try {
-    const res = await $fetch("/api/schedules/list", {
-      headers,
-      query: {
-        view: viewMode.value,
-        target_id,
-        academic_term_id: selectedTermId.value
-      }
-    })
+    await scheduleStore.load(viewMode.value, target_id, selectedTermId.value)
+    const raw = scheduleStore.schedules ?? []
 
-    events.value = (res as any[]).map((s: any) => ({
+    events.value = raw.map(s => ({
       ...s,
+      day: s.day,
       startSlot: s?.period_start?.slot_index ?? 0,
       endSlot: s?.period_end?.slot_index ?? 0,
-      label: `${s?.subject?.course_code || ""} — ${s?.subject?.description || ""}`
+      label: `${s?.subject?.course_code ?? ""} — ${s?.subject?.description ?? ""}`,
+      mode: s?.mode
     }))
   } finally {
     loading.value = false
@@ -353,20 +350,18 @@ async function reloadSchedules() {
   await loadSchedules()
 }
 
-/* ------------------------ CALENDAR HANDLERS ------------------------ */
-function attachView(base: any) {
-  const payload = { ...(base || {}) }
+/* ------------------------ HANDLERS ------------------------ */
 
-  if (viewMode.value === "CLASS") payload.class_id = selectedClassId.value
-  if (viewMode.value === "FACULTY") payload.faculty_id = selectedFacultyId.value
-  if (viewMode.value === "ROOM") payload.room_id = selectedRoomId.value
-
-  payload.academic_term_id = selectedTermId.value
-  return payload
+function attachView(payload: any) {
+  const base = { ...(payload ?? {}) }
+  if (viewMode.value === "CLASS") base.class_id = selectedClassId.value
+  if (viewMode.value === "FACULTY") base.faculty_id = selectedFacultyId.value
+  if (viewMode.value === "ROOM") base.room_id = selectedRoomId.value
+  base.academic_term_id = selectedTermId.value ?? undefined
+  return base
 }
 
-/* ✅ FIXED TYPE HERE — calendar now matches emitted payload */
-function handleCreateRange(payload: { day: string; period_start_id: string; period_end_id: string }) {
+function handleCreateRange(payload: any) {
   drawerMode.value = "CREATE"
   drawerPayload.value = attachView(payload)
   drawerLockDay.value = true
@@ -375,7 +370,11 @@ function handleCreateRange(payload: { day: string; period_start_id: string; peri
 }
 
 function handleUpdateEvent(payload: any) {
-  drawerMode.value = "RESIZE"
+  drawerMode.value =
+    payload?.mode === "CREATE" || payload?.mode === "MOVE" || payload?.mode === "RESIZE"
+      ? payload.mode
+      : "RESIZE"
+
   drawerPayload.value = attachView(payload)
   drawerLockDay.value = false
   drawerLockTime.value = false
@@ -383,10 +382,14 @@ function handleUpdateEvent(payload: any) {
 }
 
 function handleOpenEditor({ id }: { id: string }) {
-  const ev = events.value.find((e: any) => e.id === id)
+  const ev = events.value.find(e => String(e.id) === String(id))
   if (!ev) return
 
-  drawerMode.value = "MOVE"
+  drawerMode.value =
+    ev.mode === "CREATE" || ev.mode === "MOVE" || ev.mode === "RESIZE"
+      ? ev.mode
+      : "MOVE"
+
   drawerPayload.value = attachView(ev)
   drawerLockDay.value = false
   drawerLockTime.value = false
@@ -394,26 +397,17 @@ function handleOpenEditor({ id }: { id: string }) {
 }
 
 /* ------------------------ SAVE & UNDO ------------------------ */
+
 async function handleDrawerSave(payload: any) {
   saving.value = true
-
   try {
-    const {
-      data: { session }
-    } = await $supabase.auth.getSession()
-
-    const res: any = await $fetch("/api/schedules/save", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-      body: payload
-    })
-
+    const res: any = await scheduleStore.saveSchedule(payload)
     snackbar.value = {
       show: true,
       message:
-        payload.operation === "CREATE"
+        drawerMode.value === "CREATE"
           ? "Schedule added."
-          : payload.operation === "MOVE"
+          : drawerMode.value === "MOVE"
           ? "Schedule moved."
           : "Schedule updated.",
       canUndo: !!res?.undo_id,
@@ -422,11 +416,16 @@ async function handleDrawerSave(payload: any) {
     }
 
     drawerOpen.value = false
+    drawerPayload.value = null
+    drawerMode.value = "CREATE"
+    drawerLockDay.value = false
+    drawerLockTime.value = false
+
     await loadSchedules()
   } catch (err: any) {
     snackbar.value = {
       show: true,
-      message: err?.data?.message || err?.message || "Error saving schedule.",
+      message: err?.data?.message ?? err?.message ?? "Error saving schedule.",
       canUndo: false,
       undoId: null,
       timeout: 9000
@@ -439,20 +438,11 @@ async function handleDrawerSave(payload: any) {
 async function handleUndo() {
   if (!snackbar.value.undoId) return
 
-  const {
-    data: { session }
-  } = await $supabase.auth.getSession()
-
   try {
-    await $fetch("/api/schedules/undo", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-      body: { id: snackbar.value.undoId }
-    })
-
+    await scheduleStore.undoSchedule(snackbar.value.undoId)
     snackbar.value.show = false
     await loadSchedules()
-  } catch {
+  } catch (err) {
     snackbar.value = {
       show: true,
       message: "Failed to undo.",
@@ -464,9 +454,12 @@ async function handleUndo() {
 }
 
 /* ------------------------ INIT ------------------------ */
+
 onMounted(async () => {
   await loadAcademicTerms()
   await loadLists()
   await loadSchedules()
 })
 </script>
+
+

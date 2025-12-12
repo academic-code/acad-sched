@@ -20,7 +20,11 @@ export interface ScheduleRecord {
   faculty?: any
   room?: any
   class?: any
+
+  /** ✔ REQUIRED FIX — Backend sends this */
+  can_edit?: boolean
 }
+
 
 export const useScheduleStore = defineStore("scheduleStore", {
   state: () => ({

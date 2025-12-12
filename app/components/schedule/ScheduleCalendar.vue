@@ -27,26 +27,23 @@
           @mouseup="finishDrag"
           @mousemove="dragMove"
         >
-    
-<!-- Base grid -->
-<div
-  v-for="slot in periods"
-  :key="slot.id"
-  class="grid-cell"
-></div>
 
-<!-- Unified highlight overlay -->
-<div
-  v-if="dragging && dragState?.day === day.value"
-  class="highlight-block"
-  :style="{
-    top: `${dragMin * getSlotHeight()}px`,
-    height: `${(dragMax - dragMin + 1) * getSlotHeight()}px`
-  }"
-></div>
+          <!-- Base grid -->
+          <div
+            v-for="slot in periods"
+            :key="slot.id"
+            class="grid-cell"
+          ></div>
 
-
-
+          <!-- Highlight overlay -->
+          <div
+            v-if="dragging && dragState?.day === day.value"
+            class="highlight-block"
+            :style="{
+              top: `${dragMin * getSlotHeight()}px`,
+              height: `${(dragMax - dragMin + 1) * getSlotHeight()}px`
+            }"
+          ></div>
 
           <!-- Events -->
           <div
@@ -55,7 +52,7 @@
             class="event"
             :style="eventStyle(ev)"
           >
-            <span 
+            <span
               class="event-label"
               @mousedown.stop="startMove(ev, day.value)"
               @dblclick.stop="openEditor(ev)"
@@ -63,29 +60,23 @@
               {{ ev.label }}
             </span>
 
-
-            <!-- Resize handles -->
             <div class="resize-handle top" @mousedown.stop="startResize(ev, day.value, 'top', $event)"></div>
             <div class="resize-handle bottom" @mousedown.stop="startResize(ev, day.value, 'bottom', $event)"></div>
           </div>
 
-
-          <!-- 👇 NEW FIXED PREVIEW HERE -->
-          <div 
+          <!-- Drag Preview -->
+          <div
             v-if="previewBlock && dragState?.day === day.value"
             class="preview-event"
             :style="previewBlock.style"
           >
             {{ dragMode === "MOVE" ? "Move:" : "New Time Schedule:" }}
-            {{ formatTime(periods[dragMin]?.start_time ?? "") }} - 
+            {{ formatTime(periods[dragMin]?.start_time ?? "") }} -
             {{ formatTime(periods[dragMax]?.end_time ?? "") }}
-
           </div>
         </div>
       </div>
     </div>
-
-
   </div>
 </template>
 
@@ -93,22 +84,18 @@
 import { ref, computed, onMounted, onUnmounted } from "vue"
 import type { CSSProperties } from "vue"
 
-/* Emits */
 const emit = defineEmits<{
   (e: "create-range", payload: { day: string; period_start_id: string; period_end_id: string }): void
   (e: "event-drop", payload: { id: string; day: string; period_start_id: string; period_end_id: string }): void
   (e: "open-editor", payload: { id: string }): void
 }>()
 
-
-/* Props */
 const props = defineProps<{
   days: { label: string; value: string }[]
   periods: { id: string; start_time: string; end_time: string; slot_index: number }[]
   events?: any[]
 }>()
 
-/* Group events by day */
 const eventsByDay = computed(() => {
   const map: Record<string, any[]> = {}
   props.days.forEach(d => (map[d.value] = []))
@@ -116,24 +103,20 @@ const eventsByDay = computed(() => {
   return map
 })
 
-/* Drag State */
 const dragState = ref<null | { day: string; startSlot: number; event?: any }>(null)
-
 type DragMode = "CREATE" | "MOVE" | "RESIZE"
 const dragMode = ref<DragMode>("CREATE")
 
-
 const previewBlock = ref<{ style: Record<string, string>; class?: string } | null>(null)
-
 const dragging = ref(false)
 const dragMin = ref(-1)
 const dragMax = ref(-1)
+const resizeSide = ref<"top" | "bottom" | null>(null)
 
-function safeTarget(evt: MouseEvent): HTMLElement | null {
-  return evt.target instanceof HTMLElement ? evt.target : null
-}
+const safeTarget = (evt: MouseEvent) =>
+  evt.target instanceof HTMLElement ? evt.target : null
 
-function getSlotHeight() {
+const getSlotHeight = () => {
   const el = document.querySelector(".grid-cell") as HTMLElement | null
   return el?.offsetHeight ?? 50
 }
@@ -146,7 +129,6 @@ function getSlot(evt: MouseEvent): number {
   return Math.floor((evt.clientY - column.getBoundingClientRect().top) / height)
 }
 
-/* Create new schedule */
 function startNewDrag(day: string, evt: MouseEvent) {
   if (!(safeTarget(evt)?.closest(".grid-cell"))) return
   const slot = getSlot(evt)
@@ -157,13 +139,10 @@ function startNewDrag(day: string, evt: MouseEvent) {
   dragMax.value = slot
 }
 
-// ⬇️ ADD HERE (inside script)
 function openEditor(ev: any) {
   emit("open-editor", { id: ev.id })
 }
 
-
-/* Move existing schedule */
 function startMove(ev: any, day: string) {
   dragMode.value = "MOVE"
   dragState.value = { day, startSlot: ev.startSlot, event: ev }
@@ -172,37 +151,26 @@ function startMove(ev: any, day: string) {
   dragMax.value = ev.endSlot
 }
 
-/* ---- Resize Existing Schedule ---- */
 function startResize(ev: any, day: string, direction: "top" | "bottom", evt: MouseEvent) {
   dragMode.value = "RESIZE"
   dragState.value = { day, startSlot: ev.startSlot, event: ev }
   dragging.value = true
-
+  resizeSide.value = direction
   dragMin.value = ev.startSlot
   dragMax.value = ev.endSlot
-
-  // Remember which side we're dragging
-  resizeSide.value = direction
 }
 
-const resizeSide = ref<"top" | "bottom" | null>(null)
-
-
-/* Auto-scroll on drag */
 let scrollInterval: any = null
-
 function enableAutoScroll(evt: MouseEvent) {
   clearInterval(scrollInterval)
   const threshold = 60
   const speed = 6
-
   scrollInterval = setInterval(() => {
     if (evt.clientY < threshold) window.scrollBy(0, -speed)
     if (evt.clientY > window.innerHeight - threshold) window.scrollBy(0, speed)
   }, 16)
 }
 
-/* Drag Update */
 function dragMove(evt: MouseEvent) {
   if (!dragState.value) return
   enableAutoScroll(evt)
@@ -216,15 +184,12 @@ function dragMove(evt: MouseEvent) {
   const clamped = Math.max(0, Math.min(slot, props.periods.length - 1))
 
   if (dragMode.value === "RESIZE") {
-  if (resizeSide.value === "top") dragMin.value = Math.min(clamped, dragMax.value - 1)
-  if (resizeSide.value === "bottom") dragMax.value = Math.max(clamped, dragMin.value + 1)
-} else {
-  dragMin.value = Math.min(dragState.value.startSlot, clamped)
-  dragMax.value = Math.max(dragState.value.startSlot, clamped)
-}
-
-
-
+    if (resizeSide.value === "top") dragMin.value = Math.min(clamped, dragMax.value - 1)
+    if (resizeSide.value === "bottom") dragMax.value = Math.max(clamped, dragMin.value + 1)
+  } else {
+    dragMin.value = Math.min(dragState.value.startSlot, clamped)
+    dragMax.value = Math.max(dragState.value.startSlot, clamped)
+  }
 
   const conflict = hasConflict(dragState.value.day, dragMin.value, dragMax.value)
 
@@ -241,7 +206,6 @@ function dragMove(evt: MouseEvent) {
   }
 }
 
-/* Finish Drag */
 function finishDrag() {
   clearInterval(scrollInterval)
 
@@ -255,22 +219,28 @@ function finishDrag() {
   const startPeriod = props.periods[dragMin.value]
   const endPeriod = props.periods[dragMax.value]
 
+  // ✔ FIX: Guard undefined (prevents TS18048)
+  if (!startPeriod || !endPeriod) {
+    console.warn("Invalid period index — ignored drag result")
+    return resetDrag()
+  }
+
   // === CREATE NEW ===
   if (dragMode.value === "CREATE") {
     emit("create-range", {
       day: dragState.value.day,
-      period_start_id: startPeriod?.id ?? "",
-      period_end_id: endPeriod?.id ?? ""
+      period_start_id: startPeriod.id,
+      period_end_id: endPeriod.id
     })
   }
 
-  // === MOVE OR RESIZE EVENT ===
+  // === MOVE or RESIZE EXISTING ===
   if ((dragMode.value === "MOVE" || dragMode.value === "RESIZE") && dragState.value.event) {
     emit("event-drop", {
       id: String(dragState.value.event.id),
       day: dragState.value.day,
-      period_start_id: startPeriod?.id ?? "",
-      period_end_id: endPeriod?.id ?? ""
+      period_start_id: startPeriod.id,
+      period_end_id: endPeriod.id
     })
   }
 
@@ -278,13 +248,11 @@ function finishDrag() {
 }
 
 
-/* Cancel drag + Fade animation */
 function resetDrag() {
   if (previewBlock.value) {
     previewBlock.value.class = "fade-out"
     setTimeout(() => (previewBlock.value = null), 150)
   }
-
   dragState.value = null
   dragging.value = false
   resizeSide.value = null
@@ -292,18 +260,14 @@ function resetDrag() {
   dragMin.value = dragMax.value = -1
 }
 
-
-/* Check overlap */
 function hasConflict(day: string, start: number, end: number) {
   return (eventsByDay.value[day] ?? []).some(ev => !(end < ev.startSlot || start > ev.endSlot))
 }
 
-/* ESC → Cancel drag */
 const cancelDrag = (e: KeyboardEvent) => e.key === "Escape" && resetDrag()
 onMounted(() => window.addEventListener("keydown", cancelDrag))
 onUnmounted(() => window.removeEventListener("keydown", cancelDrag))
 
-/* Event style */
 function eventStyle(ev: any): CSSProperties {
   const height = getSlotHeight()
   return {
@@ -321,7 +285,6 @@ function eventStyle(ev: any): CSSProperties {
   }
 }
 
-/* Format time */
 function formatTime(t: string) {
   if (!t) return ""
   const [h, m] = t.split(":")
@@ -329,7 +292,6 @@ function formatTime(t: string) {
   return `${hh % 12 || 12}:${m} ${hh >= 12 ? "PM" : "AM"}`
 }
 </script>
-
 
 <style scoped>
 .schedule-calendar {

@@ -29,10 +29,10 @@ export interface ScheduleRecord {
 export const useScheduleStore = defineStore("scheduleStore", {
   state: () => ({
     schedules: [] as ScheduleRecord[],
-    loading: false as boolean,
+    loading: false,
     view: "CLASS" as "CLASS" | "FACULTY" | "ROOM",
-    target_id: "" as string,
-    academic_term_id: "" as string
+    target_id: "",
+    academic_term_id: ""
   }),
 
   getters: {
@@ -45,7 +45,12 @@ export const useScheduleStore = defineStore("scheduleStore", {
   },
 
   actions: {
+    // ---------------------------------------------------------
+    // LOAD
+    // ---------------------------------------------------------
     async load(view: "CLASS" | "FACULTY" | "ROOM", target_id: string, academic_term_id: string) {
+      if (!view || !target_id || !academic_term_id) return
+
       try {
         this.loading = true
         this.view = view
@@ -62,24 +67,73 @@ export const useScheduleStore = defineStore("scheduleStore", {
       }
     },
 
+    // ---------------------------------------------------------
+    // CREATE
+    // ---------------------------------------------------------
+    async createSchedule(payload: any) {
+      const api = useSchedules()
+      const res = await api.createSchedule(payload)
+
+      if (this.view && this.target_id && this.academic_term_id) {
+        await this.load(this.view, this.target_id, this.academic_term_id)
+      }
+
+      return res
+    },
+
+    // ---------------------------------------------------------
+    // UPDATE
+    // ---------------------------------------------------------
+    async updateSchedule(payload: any) {
+      const api = useSchedules()
+      const res = await api.updateSchedule(payload)
+
+      if (this.view && this.target_id && this.academic_term_id) {
+        await this.load(this.view, this.target_id, this.academic_term_id)
+      }
+
+      return res
+    },
+
+    // ---------------------------------------------------------
+    // SAVE (CREATE + UPDATE)
+    // ---------------------------------------------------------
     async saveSchedule(payload: any) {
       const api = useSchedules()
       const res = await api.saveSchedule(payload)
-      await this.load(this.view, this.target_id, this.academic_term_id)
+
+      if (this.view && this.target_id && this.academic_term_id) {
+        await this.load(this.view, this.target_id, this.academic_term_id)
+      }
+
       return res
     },
 
+    // ---------------------------------------------------------
+    // DELETE
+    // ---------------------------------------------------------
     async deleteSchedule(id: string) {
       const api = useSchedules()
       const res = await api.deleteSchedule(id)
-      await this.load(this.view, this.target_id, this.academic_term_id)
+
+      if (this.view && this.target_id && this.academic_term_id) {
+        await this.load(this.view, this.target_id, this.academic_term_id)
+      }
+
       return res
     },
 
+    // ---------------------------------------------------------
+    // UNDO
+    // ---------------------------------------------------------
     async undoSchedule(id: string) {
       const api = useSchedules()
       const res = await api.undoSchedule(id)
-      await this.load(this.view, this.target_id, this.academic_term_id)
+
+      if (this.view && this.target_id && this.academic_term_id) {
+        await this.load(this.view, this.target_id, this.academic_term_id)
+      }
+
       return res
     }
   }

@@ -171,6 +171,11 @@
 import { ref, computed, watch } from "vue"
 import { useScheduleStore } from "@/stores/useScheduleStore"
 
+// Optional mapping of known error messages to friendly messages
+const ERROR_MAP: Record<string, string> = {
+  "Validation failed": "Please check the form fields and try again."
+}
+
 //
 // --------------------------------------------------
 // STRICT INTERFACES (FIXES ALL TS ERRORS)
@@ -442,7 +447,11 @@ const snackbar = ref({ show: false, message: "", timeout: 6000 })
 
 async function handleSaveClick() {
   if (!isValid.value) {
-    snackbar.value = { show: true, message: validationMessage.value, timeout: 3000 }
+    snackbar.value = {
+      show: true,
+      message: validationMessage.value,
+      timeout: 5000
+    }
     return
   }
 
@@ -453,8 +462,8 @@ async function handleSaveClick() {
       id: local.value.id ?? undefined,
       class_id: local.value.class_id,
       subject_id: local.value.subject_id,
-      faculty_id: local.value.faculty_id,
-      room_id: local.value.mode === "F2F" ? local.value.room_id : null,
+      faculty_id: local.value.faculty_id ?? null,
+      room_id: local.value.mode === "F2F" ? local.value.room_id ?? null : null,
       day: local.value.day,
       period_start_id: local.value.period_start_id,
       period_end_id: local.value.period_end_id,
@@ -463,17 +472,46 @@ async function handleSaveClick() {
       force: false
     }
 
-    const res = await scheduleStore.saveSchedule(payload)
-    emit("save", res)
+    const res: any = await scheduleStore.saveSchedule(payload)
 
-    snackbar.value = { show: true, message: "Saved successfully.", timeout: 2000 }
-    setTimeout(() => close(), 250)
+    if (res?.conflict) {
+      snackbar.value = {
+        show: true,
+        message: "⛔ Conflict detected. Please resolve or force replace.",
+        timeout: 7000
+      }
+      return
+    }
+
+    snackbar.value = {
+      show: true,
+      message: local.value.id
+        ? "Successfully updated schedule."
+        : "Successfully saved schedule.",
+      timeout: 3000
+    }
+
+    setTimeout(() => close(), 300)
+
   } catch (err: any) {
-    snackbar.value = { show: true, message: err?.message ?? "Save failed.", timeout: 5000 }
+    const msg =
+      err?.data?.message ||
+      err?.message ||
+      "Failed to save schedule."
+
+    snackbar.value = {
+      show: true,
+      message: msg,
+      timeout: 7000
+    }
+
+    console.error("Schedule save error:", err)
   } finally {
     saving.value = false
   }
 }
+
+
 
 function close() {
   emit("update:modelValue", false)

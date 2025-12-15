@@ -21,7 +21,7 @@
           />
         </div>
 
-        <!-- View Toggle -->
+        <!-- View -->
         <div class="d-flex align-center">
           <span class="font-weight-medium mr-2">View:</span>
           <v-btn-toggle v-model="viewMode" mandatory density="comfortable">
@@ -115,22 +115,14 @@
       :lock-day="drawerLockDay"
       :lock-time="drawerLockTime"
       :current-term-semester="currentTermSemester"
-      :current-term-id="selectedTermId"
+      :current-term-id="selectedTermId ?? undefined"
       @save="handleDrawerSave"
     />
 
     <!-- Snackbar -->
     <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
       {{ snackbar.message }}
-
       <template #actions>
-        <v-btn
-          v-if="snackbar.canUndo && snackbar.undoId"
-          variant="text"
-          @click="handleUndo"
-        >
-          UNDO
-        </v-btn>
         <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
       </template>
     </v-snackbar>
@@ -138,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue"
+import { ref, computed, onMounted, watch } from "vue"
 import { useScheduleStore } from "@/stores/useScheduleStore"
 import ScheduleCalendar from "@/components/schedule/ScheduleCalendar.vue"
 import ScheduleDrawer from "@/components/schedule/ScheduleDrawer.vue"
@@ -175,9 +167,7 @@ const drawerLockTime = ref(false)
 const snackbar = ref({
   show: false,
   message: "",
-  canUndo: false,
-  undoId: null as string | null,
-  timeout: 6000
+  timeout: 4000
 })
 
 /* ---------------- COMPUTED ---------------- */
@@ -264,15 +254,8 @@ async function loadLists() {
   faculty.value = (await $supabase.from("faculty").select("*")).data || []
   rooms.value = (await $supabase.from("rooms").select("*")).data || []
 
-  const p = (await $supabase
-    .from("periods")
-    .select("*")
-    .order("slot_index")).data || []
-
-  periods.value = p.map(r => ({
-    ...r,
-    label: `${r.start_time} - ${r.end_time}`
-  }))
+  periods.value =
+    (await $supabase.from("periods").select("*").order("slot_index")).data || []
 }
 
 async function loadSchedules() {
@@ -294,7 +277,11 @@ async function reloadSchedules() {
   await loadSchedules()
 }
 
-/* ---------------- CALENDAR HANDLERS ---------------- */
+/* ---------------- WATCHERS ---------------- */
+watch([viewMode, selectedClassId, selectedFacultyId, selectedRoomId], reloadSchedules)
+watch(selectedTermId, reloadSchedules)
+
+/* ---------------- CALENDAR ---------------- */
 function attachView(base: any) {
   const payload = { ...base }
   if (viewMode.value === "CLASS") payload.class_id = selectedClassId.value
@@ -321,26 +308,19 @@ function handleUpdateEvent(payload: any) {
 function handleOpenEditor({ id }: { id: string }) {
   const ev = scheduleStore.schedules.find(s => s.id === id)
   if (!ev) return
-
   drawerMode.value = "MOVE"
   drawerPayload.value = attachView(ev)
   drawerOpen.value = true
 }
 
-/* ---------------- SAVE / UNDO ---------------- */
-async function handleDrawerSave() {
+/* ---------------- SAVE ---------------- */
+function handleDrawerSave() {
   snackbar.value = {
     show: true,
     message: "Schedule saved successfully.",
-    canUndo: false,
-    undoId: null,
-    timeout: 4000
+    timeout: 3000
   }
   drawerOpen.value = false
-}
-
-async function handleUndo() {
-  // optional undo hook
 }
 
 /* ---------------- INIT ---------------- */

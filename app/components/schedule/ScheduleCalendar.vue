@@ -2,21 +2,19 @@
   <div class="schedule-calendar">
     <!-- LEGEND -->
     <div class="legend">
-      <span class="legend-item f2f">
-        <v-icon size="14">mdi-account-group</v-icon> Face to Face
-      </span>
-      <span class="legend-item online">
-        <v-icon size="14">mdi-web</v-icon> Online
-      </span>
-      <span class="legend-item async">
-        <v-icon size="14">mdi-clock-outline</v-icon> Asynchronous
-      </span>
+      <span class="legend-item f2f">Face to Face</span>
+      <span class="legend-item online">Online</span>
+      <span class="legend-item async">Asynchronous</span>
     </div>
 
     <!-- HEADER -->
     <div class="calendar-header">
-      <div class="time-column"></div>
-      <div v-for="d in days" :key="d.value" class="day-header">
+      <div class="time-column" />
+      <div
+        v-for="d in days"
+        :key="d.value"
+        class="day-header"
+      >
         {{ d.label }}
       </div>
     </div>
@@ -25,7 +23,11 @@
     <div class="calendar-grid">
       <!-- TIME -->
       <div class="time-column">
-        <div v-for="p in periods" :key="p.id" class="time-label">
+        <div
+          v-for="p in periods"
+          :key="p.id"
+          class="time-label"
+        >
           {{ formatRange(p.start_time, p.end_time) }}
         </div>
       </div>
@@ -40,7 +42,12 @@
           @mousemove="dragMove"
           @mouseup="finishDrag"
         >
-          <div v-for="p in periods" :key="p.id" class="grid-cell" />
+          <!-- GRID CELLS -->
+          <div
+            v-for="p in periods"
+            :key="p.id"
+            class="grid-cell"
+          />
 
           <!-- EVENTS -->
           <div
@@ -52,28 +59,32 @@
             @mousedown.stop="startMove(ev, day.value)"
             @dblclick.stop="emit('open-editor', { id: ev.id })"
           >
-            <div class="event-code">{{ ev.subject?.course_code }}</div>
+            <div class="event-content">
+              <div class="event-code">
+                {{ ev.subject?.course_code }}
+              </div>
 
-            <div class="event-body">
-              <div class="event-title">{{ ev.subject?.description }}</div>
+              <div class="event-title">
+                {{ ev.subject?.description }}
+              </div>
 
               <div class="event-meta">
-                <v-icon size="14">{{ modeIcon(ev.mode) }}</v-icon>
                 {{ modeLabel(ev.mode) }}
-
                 <span v-if="ev.faculty">
                   · {{ ev.faculty.last_name }}, {{ ev.faculty.first_name }}
-                </span>
-
-                <span v-if="ev.class_name">
-                  · {{ ev.class_name }}
                 </span>
               </div>
             </div>
 
-            <!-- RESIZE -->
-            <div class="resize top" @mousedown.stop="startResize(ev, day.value, 'top')" />
-            <div class="resize bottom" @mousedown.stop="startResize(ev, day.value, 'bottom')" />
+            <!-- RESIZE HANDLES -->
+            <div
+              class="resize top"
+              @mousedown.stop="startResize(ev, day.value, 'top')"
+            />
+            <div
+              class="resize bottom"
+              @mousedown.stop="startResize(ev, day.value, 'bottom')"
+            />
           </div>
 
           <!-- PREVIEW -->
@@ -93,7 +104,12 @@
 import { ref, computed } from "vue"
 import type { CSSProperties } from "vue"
 
-const emit = defineEmits(["create-range", "event-drop", "open-editor", "conflict"])
+const emit = defineEmits([
+  "create-range",
+  "event-drop",
+  "open-editor",
+  "conflict"
+])
 
 const props = defineProps<{
   days: { label: string; value: string }[]
@@ -101,34 +117,43 @@ const props = defineProps<{
   events: any[]
 }>()
 
-/* CONSTANTS */
+/* CONSTANT */
 const rowHeight = 50
 
 /* DRAG STATE */
 const dragging = ref(false)
 const dragMode = ref<"CREATE" | "MOVE" | "RESIZE" | null>(null)
-const dragEvent = ref<any>(null)
+const dragEvent = ref<any | null>(null)
 const dragDay = ref<string | null>(null)
 const startSlot = ref(0)
 const endSlot = ref(0)
 const resizeSide = ref<"top" | "bottom" | null>(null)
 
-/* EVENTS BY DAY */
-const eventsByDay = computed(() => {
+/* GROUP EVENTS */
+const eventsByDay = computed<Record<string, any[]>>(() => {
   const map: Record<string, any[]> = {}
   props.days.forEach(d => (map[d.value] = []))
-  props.events.forEach(ev => map[ev.day]?.push(ev))
+  props.events?.forEach(ev => {
+    const day = ev?.day
+    if (typeof day === "string" && map[day]) map[day].push(ev)
+  })
   return map
 })
 
+/* SLOT CALC */
 function getSlot(e: MouseEvent, col: HTMLElement) {
   const y = e.clientY - col.getBoundingClientRect().top
-  return Math.max(0, Math.min(props.periods.length - 1, Math.floor(y / rowHeight)))
+  return Math.max(
+    0,
+    Math.min(props.periods.length - 1, Math.floor(y / rowHeight))
+  )
 }
 
+/* CONFLICT */
 function hasConflict(day: string, s: number, e: number, ignoreId?: string) {
-  return eventsByDay.value[day]?.some(ev =>
-    ev.id !== ignoreId && !(e < ev.startSlot || s > ev.endSlot)
+  return (eventsByDay.value[day] || []).some(ev =>
+    ev.id !== ignoreId &&
+    !(e < ev.startSlot || s > ev.endSlot)
   )
 }
 
@@ -162,17 +187,20 @@ function startResize(ev: any, day: string, side: "top" | "bottom") {
   endSlot.value = ev.endSlot
 }
 
-/* DRAG */
+/* DRAG MOVE */
 function dragMove(e: MouseEvent) {
   if (!dragging.value || !dragDay.value) return
   const col = (e.target as HTMLElement).closest(".day-column") as HTMLElement
   if (!col) return
+
   const slot = getSlot(e, col)
 
   if (dragMode.value === "RESIZE") {
-    resizeSide.value === "top"
-      ? (startSlot.value = Math.min(slot, endSlot.value - 1))
-      : (endSlot.value = Math.max(slot, startSlot.value + 1))
+    if (resizeSide.value === "top") {
+      startSlot.value = Math.min(slot, endSlot.value - 1)
+    } else {
+      endSlot.value = Math.max(slot, startSlot.value + 1)
+    }
   } else {
     endSlot.value = slot
   }
@@ -195,9 +223,18 @@ function finishDrag() {
   if (!startP || !endP) return reset()
 
   if (dragMode.value === "CREATE") {
-    emit("create-range", { day: dragDay.value, period_start_id: startP.id, period_end_id: endP.id })
+    emit("create-range", {
+      day: dragDay.value,
+      period_start_id: startP.id,
+      period_end_id: endP.id
+    })
   } else if (dragEvent.value) {
-    emit("event-drop", { id: dragEvent.value.id, day: dragDay.value, period_start_id: startP.id, period_end_id: endP.id })
+    emit("event-drop", {
+      id: dragEvent.value.id,
+      day: dragDay.value,
+      period_start_id: startP.id,
+      period_end_id: endP.id
+    })
   }
 
   reset()
@@ -214,17 +251,22 @@ function reset() {
 /* PREVIEW */
 const preview = computed(() => dragging.value)
 const previewConflict = computed(() =>
-  dragDay.value ? hasConflict(dragDay.value, startSlot.value, endSlot.value, dragEvent.value?.id) : false
+  dragDay.value
+    ? hasConflict(dragDay.value, startSlot.value, endSlot.value, dragEvent.value?.id)
+    : false
 )
+
 const previewStyle = computed<CSSProperties>(() => ({
   top: `${Math.min(startSlot.value, endSlot.value) * rowHeight}px`,
   height: `${(Math.abs(endSlot.value - startSlot.value) + 1) * rowHeight}px`
 }))
 
+/* EVENT STYLE */
 function eventStyle(ev: any): CSSProperties {
   return {
     top: `${ev.startSlot * rowHeight}px`,
-    height: `${(ev.endSlot - ev.startSlot + 1) * rowHeight}px`
+    height: `${(ev.endSlot - ev.startSlot + 1) * rowHeight}px`,
+    minHeight: "48px"
   }
 }
 
@@ -237,50 +279,117 @@ function fmt(t: string) {
   const hh = Number(h)
   return `${hh % 12 || 12}:${m} ${hh >= 12 ? "PM" : "AM"}`
 }
-
 function modeClass(m: string) {
   return m === "F2F" ? "f2f" : m === "ASYNC" ? "async" : "online"
 }
 function modeLabel(m: string) {
   return m === "F2F" ? "Face to Face" : m === "ASYNC" ? "Asynchronous" : "Online"
 }
-function modeIcon(m: string) {
-  return m === "F2F" ? "mdi-account-group" : m === "ASYNC" ? "mdi-clock-outline" : "mdi-web"
-}
 </script>
 
-
 <style scoped>
-/* EXACT UI YOU LIKE */
-.legend { display:flex; gap:12px; margin-bottom:10px }
-.legend-item { padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600 }
-.f2f{background:#fbc02d;color:#000}
-.online{background:#1e88e5;color:#fff}
-.async{background:#43a047;color:#fff}
+.legend {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.legend-item {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.f2f { background: #fbc02d; color: #000 }
+.online { background: #1e88e5; color: #fff }
+.async { background: #43a047; color: #fff }
 
-.calendar-header{display:grid;grid-template-columns:120px repeat(6,1fr)}
-.day-header{text-align:center;font-weight:600}
-.calendar-grid{display:flex}
-.time-column{width:120px}
-.time-label{height:50px;font-size:11px;display:flex;align-items:center;justify-content:center}
+.calendar-header {
+  display: grid;
+  grid-template-columns: 120px repeat(6, 1fr);
+}
+.day-header {
+  text-align: center;
+  font-weight: 600;
+}
+.calendar-grid {
+  display: flex;
+}
+.time-column {
+  width: 120px;
+}
+.time-label {
+  height: 50px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
-.calendar-columns{display:grid;grid-template-columns:repeat(6,1fr);flex:1}
-.day-column{position:relative}
-.grid-cell{height:50px;border-bottom:1px solid #e0f2e9}
+.calendar-columns {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  flex: 1;
+}
+.day-column {
+  position: relative;
+}
+.grid-cell {
+  height: 50px;
+  border-bottom: 1px solid #e0f2e9;
+}
 
-.event{position:absolute;left:4px;right:4px;border-radius:8px;padding:6px;color:#fff;font-size:12px;cursor:pointer}
-.event.f2f{background:#fbc02d;color:#000}
-.event.online{background:#1e88e5}
-.event.async{background:#43a047}
+.event {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.event-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+.event-code {
+  font-weight: 700;
+  font-size: 12px;
+}
+.event-title {
+  font-size: 11px;
+  line-height: 1.2;
+}
+.event-meta {
+  font-size: 10px;
+  opacity: 0.9;
+}
 
-.event-code{font-weight:700}
-.event-title{font-size:11px}
-.event-meta{font-size:10px;opacity:.9}
+.event.f2f { background: #fbc02d; color: #000 }
+.event.online { background: #1e88e5; color: #fff }
+.event.async { background: #43a047; color: #fff }
 
-.resize{position:absolute;left:0;right:0;height:6px;cursor:row-resize}
-.resize.top{top:-3px}
-.resize.bottom{bottom:-3px}
+.resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+}
+.resize.top { top: -3px }
+.resize.bottom { bottom: -3px }
 
-.preview{position:absolute;left:4px;right:4px;border:2px dashed #2196f3;background:rgba(33,150,243,.15);border-radius:8px}
-.preview.conflict{border-color:red;background:rgba(255,0,0,.15)}
+.preview {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  border: 2px dashed #2196f3;
+  background: rgba(33,150,243,.15);
+  border-radius: 8px;
+}
+.preview.conflict {
+  border-color: red;
+  background: rgba(255,0,0,.15);
+}
 </style>

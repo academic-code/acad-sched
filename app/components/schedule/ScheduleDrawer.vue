@@ -11,7 +11,10 @@
       <div class="d-flex justify-space-between align-center mb-2">
         <div>
           <h3 class="text-h6 font-weight-medium">{{ headerTitle }}</h3>
-          <div v-if="summaryLabel" class="text-caption text-medium-emphasis mt-1">
+          <div
+            v-if="summaryLabel"
+            class="text-caption text-medium-emphasis mt-1"
+          >
             {{ summaryLabel }}
           </div>
         </div>
@@ -23,7 +26,7 @@
 
       <v-divider class="my-3" />
 
-      <!-- VALIDATION MESSAGE -->
+      <!-- VALIDATION -->
       <v-alert
         v-if="validationMessage"
         type="warning"
@@ -42,8 +45,8 @@
         :item-title="classLabel"
         item-value="id"
         label="Class"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
         :disabled="classDisabled"
         clearable
@@ -56,10 +59,10 @@
         :item-title="subjectLabel"
         item-value="id"
         label="Subject"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
-        :disabled="!local.class_id || subjectDisabled"
+        :disabled="subjectDisabled"
         clearable
       />
 
@@ -70,8 +73,8 @@
         item-title="full_name"
         item-value="id"
         label="Teacher (optional)"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
         :disabled="facultyDisabled"
         clearable
@@ -84,8 +87,8 @@
         item-title="name"
         item-value="id"
         label="Room (Face-to-Face only)"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
         :disabled="roomDisabled"
         clearable
@@ -98,8 +101,8 @@
         item-title="label"
         item-value="value"
         label="Mode"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
         :disabled="modeDisabled"
       />
@@ -111,8 +114,8 @@
         item-title="label"
         item-value="value"
         label="Day"
-        density="comfortable"
         variant="outlined"
+        density="comfortable"
         class="mb-3"
         :disabled="dayDisabled"
       />
@@ -126,8 +129,8 @@
             :item-title="periodLabel"
             item-value="id"
             label="Start Time"
-            density="comfortable"
             variant="outlined"
+            density="comfortable"
             :disabled="timeDisabled"
           />
         </v-col>
@@ -138,8 +141,8 @@
             :item-title="periodLabel"
             item-value="id"
             label="End Time"
-            density="comfortable"
             variant="outlined"
+            density="comfortable"
             :disabled="timeDisabled"
           />
         </v-col>
@@ -163,7 +166,11 @@
     </v-card>
 
     <!-- SNACKBAR -->
-    <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
+    <v-snackbar
+      v-model="snackbar.show"
+      location="bottom"
+      :timeout="snackbar.timeout"
+    >
       {{ snackbar.message }}
       <template #actions>
         <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
@@ -177,7 +184,7 @@ import { ref, computed, watch } from "vue"
 import { useScheduleStore } from "@/stores/useScheduleStore"
 
 /* -------------------------------------------------- */
-/* PROPS & EMITS */
+/* PROPS / EMITS */
 /* -------------------------------------------------- */
 const props = defineProps<{
   modelValue: boolean
@@ -186,7 +193,6 @@ const props = defineProps<{
   payload: any
   classes: any[]
   subjects: any[]
-  classSubjects: any[]
   faculty: any[]
   rooms: any[]
   periods: any[]
@@ -198,11 +204,10 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(["update:modelValue", "save"])
-
-const scheduleStore = useScheduleStore()
+const store = useScheduleStore()
 
 /* -------------------------------------------------- */
-/* SAFE DATA */
+/* SAFE LISTS */
 /* -------------------------------------------------- */
 const classesSafe = computed(() => props.classes ?? [])
 const subjectsSafe = computed(() => props.subjects ?? [])
@@ -214,21 +219,21 @@ const daysSafe = computed(() => props.days ?? [])
 /* -------------------------------------------------- */
 /* LOCAL MODEL */
 /* -------------------------------------------------- */
-const local = ref({
-  id: null as string | null,
-  class_id: null as string | null,
-  subject_id: null as string | null,
-  faculty_id: null as string | null,
-  room_id: null as string | null,
+const local = ref<any>({
+  id: null,
+  class_id: null,
+  subject_id: null,
+  faculty_id: null,
+  room_id: null,
   mode: "F2F",
-  day: null as string | null,
-  period_start_id: null as string | null,
-  period_end_id: null as string | null,
+  day: null,
+  period_start_id: null,
+  period_end_id: null,
   academic_term_id: props.currentTermId
 })
 
 /* -------------------------------------------------- */
-/* LABEL HELPERS */
+/* LABELS */
 /* -------------------------------------------------- */
 const classLabel = (c: any) =>
   `${c.class_name} ${c.year_level_label} - ${c.section}`
@@ -237,10 +242,10 @@ const subjectLabel = (s: any) =>
   `${s.course_code} — ${s.description}`
 
 const periodLabel = (p: any) =>
-  `${p.start_time} - ${p.end_time}`
+  `${p.start_time} – ${p.end_time}`
 
 /* -------------------------------------------------- */
-/* MODE */
+/* MODE OPTIONS */
 /* -------------------------------------------------- */
 const modeItems = [
   { value: "F2F", label: "Face to Face" },
@@ -259,42 +264,21 @@ const facultyList = computed(() =>
 )
 
 /* -------------------------------------------------- */
-/* LOCK RULES (CRITICAL) */
+/* DISABLE RULES */
 /* -------------------------------------------------- */
-const classDisabled = computed(() =>
-  props.mode !== "CREATE"
-)
-
-const subjectDisabled = computed(() =>
-  props.role === "ADMIN"
-)
-
-const facultyDisabled = computed(() =>
-  props.role === "ADMIN"
-)
-
-const modeDisabled = computed(() =>
-  props.role === "ADMIN"
-)
-
-const dayDisabled = computed(() =>
-  props.lockDay
-)
-
-const timeDisabled = computed(() =>
-  props.lockTime
-)
-
-const roomDisabled = computed(() =>
-  local.value.mode !== "F2F"
-)
+const classDisabled = computed(() => props.mode !== "CREATE")
+const subjectDisabled = computed(() => props.role === "ADMIN")
+const facultyDisabled = computed(() => props.role === "ADMIN")
+const modeDisabled = computed(() => props.role === "ADMIN")
+const dayDisabled = computed(() => props.lockDay)
+const timeDisabled = computed(() => props.lockTime)
+const roomDisabled = computed(() => local.value.mode !== "F2F")
 
 /* -------------------------------------------------- */
 /* SUBJECT FILTER */
 /* -------------------------------------------------- */
 const filteredSubjects = computed(() => {
   if (!local.value.class_id) return []
-
   const cls = classesSafe.value.find(c => c.id === local.value.class_id)
   if (!cls) return []
 
@@ -306,9 +290,9 @@ const filteredSubjects = computed(() => {
 })
 
 /* -------------------------------------------------- */
-/* HEADER & SUMMARY */
+/* HEADER */
 /* -------------------------------------------------- */
-const isEdit = computed(() => !!local.value.id)
+const isEdit = computed(() => Boolean(local.value.id))
 
 const headerTitle = computed(() =>
   props.mode === "MOVE"
@@ -324,7 +308,7 @@ const summaryLabel = computed(() => {
   if (!local.value.day || !local.value.period_start_id) return ""
   const day = daysSafe.value.find(d => d.value === local.value.day)?.label
   const p = periodsSafe.value.find(p => p.id === local.value.period_start_id)
-  return `${day} · ${periodLabel(p)}`
+  return day && p ? `${day} · ${periodLabel(p)}` : ""
 })
 
 /* -------------------------------------------------- */
@@ -337,11 +321,10 @@ const validationMessage = computed(() => {
   if (!local.value.period_start_id || !local.value.period_end_id)
     return "Start and end time are required."
 
-  const start = periodsSafe.value.find(p => p.id === local.value.period_start_id)
-  const end = periodsSafe.value.find(p => p.id === local.value.period_end_id)
-
-  if (!start || !end) return "Invalid period selection."
-  if (start.slot_index > end.slot_index)
+  const s = periodsSafe.value.find(p => p.id === local.value.period_start_id)
+  const e = periodsSafe.value.find(p => p.id === local.value.period_end_id)
+  if (!s || !e) return "Invalid period selection."
+  if (s.slot_index > e.slot_index)
     return "End time must be after start time."
 
   if (local.value.mode !== "F2F" && local.value.room_id)
@@ -379,43 +362,43 @@ watch(
 /* SAVE */
 /* -------------------------------------------------- */
 const saving = ref(false)
-const snackbar = ref({ show: false, message: "", timeout: 4000 })
+const snackbar = ref({
+  show: false,
+  message: "",
+  timeout: 4000
+})
 
 async function handleSave() {
   if (!isValid.value) {
-    snackbar.value = { show: true, message: validationMessage.value, timeout: 5000 }
+    snackbar.value = {
+      show: true,
+      message: validationMessage.value,
+      timeout: 5000
+    }
     return
   }
 
   saving.value = true
   try {
-const res = await scheduleStore.saveSchedule({
-  ...local.value,
-  force: false
-})
+    const res = await store.saveSchedule({
+      ...local.value,
+      force: false
+    })
 
-if (res && "requires_force" in res && res.requires_force) {
-  const { classConflicts, facultyConflicts, roomConflicts } =
-    res.conflicts?.details ?? {}
-
-  let msg = "⛔ Conflict detected."
-
-  if (classConflicts?.length) msg += " Class conflict."
-  if (facultyConflicts?.length) msg += " Faculty conflict."
-  if (roomConflicts?.length) msg += " Room conflict."
-
-  snackbar.value = {
-    show: true,
-    message: msg,
-    timeout: 8000
-  }
-  return
-}
-
+    if (res && "requires_force" in res && res['requires_force']) {
+      snackbar.value = {
+        show: true,
+        message: "⛔ Conflict detected. Please resolve before saving.",
+        timeout: 7000
+      }
+      return
+    }
 
     snackbar.value = {
       show: true,
-      message: isEdit.value ? "Schedule updated." : "Schedule created.",
+      message: isEdit.value
+        ? "Schedule updated successfully."
+        : "Schedule created successfully.",
       timeout: 3000
     }
 

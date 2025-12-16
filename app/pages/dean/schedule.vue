@@ -2,10 +2,11 @@
   <div>
     <h1 class="text-h5 font-weight-bold mb-4">Schedule</h1>
 
-    <!-- Toolbar -->
+    <!-- TOOLBAR -->
     <v-card class="mb-4 pa-3">
       <div class="d-flex flex-wrap gap-3 align-center justify-space-between">
-        <!-- Term -->
+
+        <!-- TERM -->
         <div class="d-flex align-center">
           <span class="font-weight-medium mr-2">Term:</span>
           <v-select
@@ -20,7 +21,7 @@
           />
         </div>
 
-        <!-- View -->
+        <!-- VIEW -->
         <div class="d-flex align-center">
           <span class="font-weight-medium mr-2">View:</span>
           <v-btn-toggle v-model="viewMode" mandatory density="comfortable">
@@ -30,7 +31,7 @@
           </v-btn-toggle>
         </div>
 
-        <!-- Target -->
+        <!-- TARGET -->
         <div class="d-flex align-center">
           <span class="font-weight-medium mr-2">{{ targetLabel }}:</span>
 
@@ -73,7 +74,7 @@
       </div>
     </v-card>
 
-    <!-- Require selection -->
+    <!-- REQUIRE SELECTION -->
     <v-alert
       v-if="requiresSelection"
       type="info"
@@ -84,7 +85,7 @@
       Please select a {{ targetLabel.toLowerCase() }} to view the schedule.
     </v-alert>
 
-    <!-- Calendar -->
+    <!-- CALENDAR -->
     <ScheduleCalendar
       v-if="!requiresSelection"
       :days="days"
@@ -95,7 +96,7 @@
       @open-editor="handleOpenEditor"
     />
 
-    <!-- Drawer -->
+    <!-- DRAWER -->
     <ScheduleDrawer
       v-model="drawerOpen"
       role="DEAN"
@@ -103,7 +104,6 @@
       :payload="drawerPayload"
       :classes="classes"
       :subjects="subjects"
-      :class-subjects="classSubjects"
       :faculty="faculty"
       :periods="periods"
       :rooms="rooms"
@@ -111,11 +111,11 @@
       :lock-day="drawerLockDay"
       :lock-time="drawerLockTime"
       :current-term-semester="currentTermSemester"
-      :current-term-id="selectedTermId ?? null"
+      :current-term-id="selectedTermId"
       @save="handleDrawerSave"
     />
 
-    <!-- Snackbar -->
+    <!-- SNACKBAR -->
     <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
       {{ snackbar.message }}
       <template #actions>
@@ -142,7 +142,6 @@ const selectedTermId = ref<string | null>(null)
 
 const classes = ref<any[]>([])
 const subjects = ref<any[]>([])
-const classSubjects = ref<any[]>([])
 const faculty = ref<any[]>([])
 const rooms = ref<any[]>([])
 const periods = ref<any[]>([])
@@ -169,8 +168,7 @@ const snackbar = ref({
 /* ---------------- COMPUTED ---------------- */
 
 /**
- * ✅ THIS IS THE MOST IMPORTANT FIX
- * Calendar now receives FULL event objects
+ * 🔑 Calendar receives normalized + complete event objects
  */
 const calendarEvents = computed(() =>
   scheduleStore.sorted.map(s => ({
@@ -180,7 +178,6 @@ const calendarEvents = computed(() =>
     endSlot: s.period_end?.slot_index ?? 0,
     mode: s.mode,
 
-    // ✅ RESTORE NESTED OBJECTS (THIS FIXES EVERYTHING)
     subject: s.subject
       ? {
           course_code: s.subject.course_code,
@@ -193,10 +190,13 @@ const calendarEvents = computed(() =>
           first_name: s.faculty.first_name,
           last_name: s.faculty.last_name
         }
+      : null,
+
+    class_name: s.class
+      ? `${s.class.class_name} ${s.class.year_level_label}-${s.class.section}`
       : null
   }))
 )
-
 
 const targetLabel = computed(() =>
   ({ CLASS: "Class", FACULTY: "Faculty", ROOM: "Room" }[viewMode.value])
@@ -209,12 +209,12 @@ const requiresSelection = computed(() => {
 })
 
 const days = [
-  { value: "MON", label: "Mon" },
-  { value: "TUE", label: "Tue" },
-  { value: "WED", label: "Wed" },
-  { value: "THU", label: "Thu" },
-  { value: "FRI", label: "Fri" },
-  { value: "SAT", label: "Sat" }
+  { value: "MONDAY", label: "Mon" },
+  { value: "TUESDAY", label: "Tue" },
+  { value: "WEDNESDAY", label: "Wed" },
+  { value: "THURSDAY", label: "Thu" },
+  { value: "FRIDAY", label: "Fri" },
+  { value: "SATURDAY", label: "Sat" }
 ]
 
 const termOptions = computed(() =>
@@ -229,19 +229,19 @@ const classOptions = computed(() =>
     .filter(c => c.academic_term_id === selectedTermId.value)
     .map(c => ({
       value: c.id,
-      label: `${c.class_name} ${c.year_level_label} - ${c.section}`
+      label: `${c.class_name} ${c.year_level_label}-${c.section}`
     }))
 )
 
 const facultyOptions = computed(() =>
-  faculty.value.map((f: any) => ({
+  faculty.value.map(f => ({
     value: f.id,
     label: `${f.last_name}, ${f.first_name}`
   }))
 )
 
 const roomOptions = computed(() =>
-  rooms.value.map((r: any) => ({
+  rooms.value.map(r => ({
     value: r.id,
     label: r.name
   }))
@@ -256,7 +256,8 @@ const currentTermSemester = computed(() => {
 async function loadAcademicTerms() {
   const { data } = await $supabase.from("academic_terms").select("*")
   academicTerms.value = data || []
-  selectedTermId.value = academicTerms.value.find(t => t.is_active)?.id || null
+  selectedTermId.value =
+    academicTerms.value.find(t => t.is_active)?.id ?? null
 }
 
 async function loadLists() {
@@ -265,11 +266,12 @@ async function loadLists() {
 
   classes.value = await $fetch("/api/classes/list", { headers })
   subjects.value = await $fetch("/api/subjects/list", { headers })
-  classSubjects.value = await $fetch("/api/class-subjects/list", { headers })
 
   faculty.value = (await $supabase.from("faculty").select("*")).data || []
   rooms.value = (await $supabase.from("rooms").select("*")).data || []
-  periods.value = (await $supabase.from("periods").select("*").order("slot_index")).data || []
+  periods.value = (
+    await $supabase.from("periods").select("*").order("slot_index")
+  ).data || []
 }
 
 async function loadSchedules() {
@@ -284,7 +286,11 @@ async function loadSchedules() {
 
   if (!targetId) return
 
-  await scheduleStore.load(viewMode.value, targetId, selectedTermId.value)
+  await scheduleStore.load(
+    viewMode.value,
+    targetId,
+    selectedTermId.value
+  )
 }
 
 /* ---------------- WATCHERS ---------------- */
@@ -294,28 +300,26 @@ watch(
 )
 
 /* ---------------- CALENDAR HANDLERS ---------------- */
-function attachView(base: any) {
-  const payload = { ...base }
-  if (viewMode.value === "CLASS") payload.class_id = selectedClassId.value
-  if (viewMode.value === "FACULTY") payload.faculty_id = selectedFacultyId.value
-  if (viewMode.value === "ROOM") payload.room_id = selectedRoomId.value
-  payload.academic_term_id = selectedTermId.value
-  return payload
+function attachContext(base: any) {
+  const p = { ...base }
+  if (viewMode.value === "CLASS") p.class_id = selectedClassId.value
+  if (viewMode.value === "FACULTY") p.faculty_id = selectedFacultyId.value
+  if (viewMode.value === "ROOM") p.room_id = selectedRoomId.value
+  p.academic_term_id = selectedTermId.value
+  return p
 }
 
 function handleCreateRange(payload: any) {
   drawerMode.value = "CREATE"
-  drawerPayload.value = attachView(payload)
-
+  drawerPayload.value = attachContext(payload)
   drawerLockDay.value = true
   drawerLockTime.value = true
-
   drawerOpen.value = true
 }
 
 function handleUpdateEvent(payload: any) {
   drawerMode.value = "RESIZE"
-  drawerPayload.value = attachView(payload)
+  drawerPayload.value = attachContext(payload)
   drawerOpen.value = true
 }
 
@@ -324,12 +328,9 @@ function handleOpenEditor({ id }: { id: string }) {
   if (!ev) return
 
   drawerMode.value = "MOVE"
-  drawerPayload.value = attachView(ev)
-
-  // 🔒 RULES
+  drawerPayload.value = attachContext(ev)
   drawerLockDay.value = viewMode.value !== "CLASS"
   drawerLockTime.value = viewMode.value !== "CLASS"
-
   drawerOpen.value = true
 }
 

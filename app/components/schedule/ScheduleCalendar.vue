@@ -1,11 +1,16 @@
 <template>
   <div class="schedule-calendar">
-
     <!-- LEGEND -->
     <div class="legend">
-      <span class="legend-item f2f">Face to Face</span>
-      <span class="legend-item online">Online</span>
-      <span class="legend-item async">Asynchronous</span>
+      <span class="legend-item f2f">
+        <v-icon size="14">mdi-account-group</v-icon> Face to Face
+      </span>
+      <span class="legend-item online">
+        <v-icon size="14">mdi-web</v-icon> Online
+      </span>
+      <span class="legend-item async">
+        <v-icon size="14">mdi-clock-outline</v-icon> Asynchronous
+      </span>
     </div>
 
     <!-- HEADER -->
@@ -18,14 +23,9 @@
 
     <!-- GRID -->
     <div class="calendar-grid">
-
       <!-- TIME -->
       <div class="time-column">
-        <div
-          v-for="p in periods"
-          :key="p.id"
-          class="time-label"
-        >
+        <div v-for="p in periods" :key="p.id" class="time-label">
           {{ formatRange(p.start_time, p.end_time) }}
         </div>
       </div>
@@ -40,13 +40,7 @@
           @mousemove="dragMove"
           @mouseup="finishDrag"
         >
-
-          <!-- GRID CELLS -->
-          <div
-            v-for="p in periods"
-            :key="p.id"
-            class="grid-cell"
-          />
+          <div v-for="p in periods" :key="p.id" class="grid-cell" />
 
           <!-- EVENTS -->
           <div
@@ -59,12 +53,22 @@
             @dblclick.stop="emit('open-editor', { id: ev.id })"
           >
             <div class="event-code">{{ ev.subject?.course_code }}</div>
-            <div class="event-title">{{ ev.subject?.description }}</div>
-            <div class="event-meta">
-              {{ modeLabel(ev.mode) }}
-              <span v-if="ev.faculty">
-                · {{ ev.faculty.last_name }}, {{ ev.faculty.first_name }}
-              </span>
+
+            <div class="event-body">
+              <div class="event-title">{{ ev.subject?.description }}</div>
+
+              <div class="event-meta">
+                <v-icon size="14">{{ modeIcon(ev.mode) }}</v-icon>
+                {{ modeLabel(ev.mode) }}
+
+                <span v-if="ev.faculty">
+                  · {{ ev.faculty.last_name }}, {{ ev.faculty.first_name }}
+                </span>
+
+                <span v-if="ev.class_name">
+                  · {{ ev.class_name }}
+                </span>
+              </div>
             </div>
 
             <!-- RESIZE -->
@@ -97,8 +101,10 @@ const props = defineProps<{
   events: any[]
 }>()
 
-/* ---------------- DATA ---------------- */
+/* CONSTANTS */
 const rowHeight = 50
+
+/* DRAG STATE */
 const dragging = ref(false)
 const dragMode = ref<"CREATE" | "MOVE" | "RESIZE" | null>(null)
 const dragEvent = ref<any>(null)
@@ -107,7 +113,7 @@ const startSlot = ref(0)
 const endSlot = ref(0)
 const resizeSide = ref<"top" | "bottom" | null>(null)
 
-/* ---------------- COMPUTED ---------------- */
+/* EVENTS BY DAY */
 const eventsByDay = computed(() => {
   const map: Record<string, any[]> = {}
   props.days.forEach(d => (map[d.value] = []))
@@ -115,24 +121,18 @@ const eventsByDay = computed(() => {
   return map
 })
 
-/* ---------------- HELPERS ---------------- */
 function getSlot(e: MouseEvent, col: HTMLElement) {
   const y = e.clientY - col.getBoundingClientRect().top
   return Math.max(0, Math.min(props.periods.length - 1, Math.floor(y / rowHeight)))
 }
 
 function hasConflict(day: string, s: number, e: number, ignoreId?: string) {
-  const list = eventsByDay.value[day]
-  if (!list) return false
-
-  return list.some(ev =>
-    ev.id !== ignoreId &&
-    !(e < ev.startSlot || s > ev.endSlot)
+  return eventsByDay.value[day]?.some(ev =>
+    ev.id !== ignoreId && !(e < ev.startSlot || s > ev.endSlot)
   )
 }
 
-
-/* ---------------- CREATE ---------------- */
+/* CREATE */
 function startCreate(day: string, e: MouseEvent) {
   if (!(e.target as HTMLElement).classList.contains("grid-cell")) return
   dragging.value = true
@@ -141,7 +141,7 @@ function startCreate(day: string, e: MouseEvent) {
   startSlot.value = endSlot.value = getSlot(e, e.currentTarget as HTMLElement)
 }
 
-/* ---------------- MOVE ---------------- */
+/* MOVE */
 function startMove(ev: any, day: string) {
   dragging.value = true
   dragMode.value = "MOVE"
@@ -151,7 +151,7 @@ function startMove(ev: any, day: string) {
   endSlot.value = ev.endSlot
 }
 
-/* ---------------- RESIZE ---------------- */
+/* RESIZE */
 function startResize(ev: any, day: string, side: "top" | "bottom") {
   dragging.value = true
   dragMode.value = "RESIZE"
@@ -162,7 +162,7 @@ function startResize(ev: any, day: string, side: "top" | "bottom") {
   endSlot.value = ev.endSlot
 }
 
-/* ---------------- DRAG ---------------- */
+/* DRAG */
 function dragMove(e: MouseEvent) {
   if (!dragging.value || !dragDay.value) return
   const col = (e.target as HTMLElement).closest(".day-column") as HTMLElement
@@ -171,50 +171,34 @@ function dragMove(e: MouseEvent) {
 
   if (dragMode.value === "RESIZE") {
     resizeSide.value === "top"
-      ? startSlot.value = Math.min(slot, endSlot.value - 1)
-      : endSlot.value = Math.max(slot, startSlot.value + 1)
+      ? (startSlot.value = Math.min(slot, endSlot.value - 1))
+      : (endSlot.value = Math.max(slot, startSlot.value + 1))
   } else {
     endSlot.value = slot
   }
 }
 
-/* ---------------- DROP ---------------- */
+/* DROP */
 function finishDrag() {
   if (!dragging.value || !dragDay.value) return reset()
 
   const s = Math.min(startSlot.value, endSlot.value)
   const e = Math.max(startSlot.value, endSlot.value)
 
-  const conflict = hasConflict(dragDay.value, s, e, dragEvent.value?.id)
-  if (conflict) {
+  if (hasConflict(dragDay.value, s, e, dragEvent.value?.id)) {
     emit("conflict")
     return reset()
   }
 
   const startP = props.periods[s]
-const endP = props.periods[e]
+  const endP = props.periods[e]
+  if (!startP || !endP) return reset()
 
-// ✅ HARD GUARD (required)
-if (!startP || !endP || !dragDay.value) {
-  reset()
-  return
-}
-
-if (dragMode.value === "CREATE") {
-  emit("create-range", {
-    day: dragDay.value,
-    period_start_id: startP.id,
-    period_end_id: endP.id
-  })
-} else if (dragEvent.value) {
-  emit("event-drop", {
-    id: dragEvent.value.id,
-    day: dragDay.value,
-    period_start_id: startP.id,
-    period_end_id: endP.id
-  })
-}
-
+  if (dragMode.value === "CREATE") {
+    emit("create-range", { day: dragDay.value, period_start_id: startP.id, period_end_id: endP.id })
+  } else if (dragEvent.value) {
+    emit("event-drop", { id: dragEvent.value.id, day: dragDay.value, period_start_id: startP.id, period_end_id: endP.id })
+  }
 
   reset()
 }
@@ -227,14 +211,11 @@ function reset() {
   resizeSide.value = null
 }
 
-/* ---------------- STYLES ---------------- */
+/* PREVIEW */
 const preview = computed(() => dragging.value)
 const previewConflict = computed(() =>
-  dragDay.value
-    ? hasConflict(dragDay.value, startSlot.value, endSlot.value, dragEvent.value?.id)
-    : false
+  dragDay.value ? hasConflict(dragDay.value, startSlot.value, endSlot.value, dragEvent.value?.id) : false
 )
-
 const previewStyle = computed<CSSProperties>(() => ({
   top: `${Math.min(startSlot.value, endSlot.value) * rowHeight}px`,
   height: `${(Math.abs(endSlot.value - startSlot.value) + 1) * rowHeight}px`
@@ -247,7 +228,7 @@ function eventStyle(ev: any): CSSProperties {
   }
 }
 
-/* ---------------- FORMAT ---------------- */
+/* HELPERS */
 function formatRange(s: string, e: string) {
   return `${fmt(s)} – ${fmt(e)}`
 }
@@ -263,7 +244,11 @@ function modeClass(m: string) {
 function modeLabel(m: string) {
   return m === "F2F" ? "Face to Face" : m === "ASYNC" ? "Asynchronous" : "Online"
 }
+function modeIcon(m: string) {
+  return m === "F2F" ? "mdi-account-group" : m === "ASYNC" ? "mdi-clock-outline" : "mdi-web"
+}
 </script>
+
 
 <style scoped>
 /* EXACT UI YOU LIKE */

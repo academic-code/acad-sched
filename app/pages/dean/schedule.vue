@@ -111,7 +111,7 @@
       :lock-day="drawerLockDay"
       :lock-time="drawerLockTime"
       :current-term-semester="currentTermSemester"
-      :current-term-id="selectedTermId ?? undefined"
+      :current-term-id="selectedTermId ?? null"
       @save="handleDrawerSave"
     />
 
@@ -306,8 +306,10 @@ function attachView(base: any) {
 function handleCreateRange(payload: any) {
   drawerMode.value = "CREATE"
   drawerPayload.value = attachView(payload)
+
   drawerLockDay.value = true
   drawerLockTime.value = true
+
   drawerOpen.value = true
 }
 
@@ -320,8 +322,14 @@ function handleUpdateEvent(payload: any) {
 function handleOpenEditor({ id }: { id: string }) {
   const ev = scheduleStore.schedules.find(s => s.id === id)
   if (!ev) return
+
   drawerMode.value = "MOVE"
   drawerPayload.value = attachView(ev)
+
+  // 🔒 RULES
+  drawerLockDay.value = viewMode.value !== "CLASS"
+  drawerLockTime.value = viewMode.value !== "CLASS"
+
   drawerOpen.value = true
 }
 

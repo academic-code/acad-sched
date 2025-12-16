@@ -6,7 +6,8 @@
     temporary
   >
     <v-card flat class="pa-4">
-      <!-- Header -->
+
+      <!-- HEADER -->
       <div class="d-flex justify-space-between align-center mb-2">
         <div>
           <h3 class="text-h6 font-weight-medium">{{ headerTitle }}</h3>
@@ -22,7 +23,7 @@
 
       <v-divider class="my-3" />
 
-      <!-- Validation -->
+      <!-- VALIDATION MESSAGE -->
       <v-alert
         v-if="validationMessage"
         type="warning"
@@ -34,7 +35,7 @@
         {{ validationMessage }}
       </v-alert>
 
-      <!-- Class -->
+      <!-- CLASS -->
       <v-select
         v-model="local.class_id"
         :items="classesSafe"
@@ -44,11 +45,11 @@
         density="comfortable"
         variant="outlined"
         class="mb-3"
-        :disabled="role === 'ADMIN'"
+        :disabled="classDisabled"
         clearable
       />
 
-      <!-- Subject -->
+      <!-- SUBJECT -->
       <v-select
         v-model="local.subject_id"
         :items="filteredSubjects"
@@ -58,11 +59,11 @@
         density="comfortable"
         variant="outlined"
         class="mb-3"
-        :disabled="!local.class_id || role === 'ADMIN'"
+        :disabled="!local.class_id || subjectDisabled"
         clearable
       />
 
-      <!-- Faculty -->
+      <!-- FACULTY -->
       <v-select
         v-model="local.faculty_id"
         :items="facultyList"
@@ -72,50 +73,51 @@
         density="comfortable"
         variant="outlined"
         class="mb-3"
-        :disabled="role === 'ADMIN'"
+        :disabled="facultyDisabled"
         clearable
       />
 
-      <!-- Room -->
+      <!-- ROOM -->
       <v-select
         v-model="local.room_id"
         :items="roomsSafe"
         item-title="name"
         item-value="id"
-        label="Room (optional — F2F only)"
+        label="Room (Face-to-Face only)"
         density="comfortable"
         variant="outlined"
         class="mb-3"
-        :disabled="roomDisabled || role === 'ADMIN'"
+        :disabled="roomDisabled"
         clearable
       />
 
-      <!-- Mode -->
+      <!-- MODE -->
       <v-select
         v-model="local.mode"
         :items="modeItems"
-        :item-title="modeLabel"
+        item-title="label"
         item-value="value"
         label="Mode"
         density="comfortable"
         variant="outlined"
         class="mb-3"
-        :disabled="role === 'ADMIN'"
+        :disabled="modeDisabled"
       />
 
-      <!-- Day -->
+      <!-- DAY -->
       <v-select
         v-model="local.day"
         :items="daysSafe"
-        :item-title="dayLabel"
+        item-title="label"
         item-value="value"
         label="Day"
         density="comfortable"
         variant="outlined"
         class="mb-3"
+        :disabled="dayDisabled"
       />
 
-      <!-- Time -->
+      <!-- TIME -->
       <v-row>
         <v-col>
           <v-select
@@ -126,6 +128,7 @@
             label="Start Time"
             density="comfortable"
             variant="outlined"
+            :disabled="timeDisabled"
           />
         </v-col>
         <v-col>
@@ -137,27 +140,29 @@
             label="End Time"
             density="comfortable"
             variant="outlined"
+            :disabled="timeDisabled"
           />
         </v-col>
       </v-row>
 
       <v-divider class="my-4" />
 
+      <!-- ACTIONS -->
       <div class="d-flex justify-end">
         <v-btn variant="text" @click="close">Cancel</v-btn>
-
         <v-btn
           color="primary"
           class="ml-2"
-          :disabled="!isValid || saving"
           :loading="saving"
-          @click="handleSaveClick"
+          :disabled="!isValid || saving"
+          @click="handleSave"
         >
           {{ isEdit ? "Update" : "Save" }}
         </v-btn>
       </div>
     </v-card>
 
+    <!-- SNACKBAR -->
     <v-snackbar v-model="snackbar.show" location="bottom" :timeout="snackbar.timeout">
       {{ snackbar.message }}
       <template #actions>
@@ -171,94 +176,44 @@
 import { ref, computed, watch } from "vue"
 import { useScheduleStore } from "@/stores/useScheduleStore"
 
-// Optional mapping of known error messages to friendly messages
-const ERROR_MAP: Record<string, string> = {
-  "Validation failed": "Please check the form fields and try again."
-}
-
-//
-// --------------------------------------------------
-// STRICT INTERFACES (FIXES ALL TS ERRORS)
-// --------------------------------------------------
-interface ClassItem {
-  id: string
-  class_name: string
-  year_level_number: number
-  year_level_label: string
-  section: string
-}
-
-interface SubjectItem {
-  id: string
-  course_code: string
-  description: string
-  year_level_number: number
-  semester: string
-  is_gened?: boolean
-}
-
-interface PeriodItem {
-  id: string
-  label?: string
-  start_time?: string
-  end_time?: string
-  slot_index: number
-}
-
-interface ClassSubjectMap {
-  class_id: string
-  subject_id: string
-  academic_term_id: string
-}
-
-//
-// Props & Emits
-//
-const props = defineProps({
-  modelValue: Boolean,
-  role: String,
-  mode: String,
-  payload: Object,
-  classes: Array,
-  subjects: Array,
-  classSubjects: Array,
-  faculty: Array,
-  periods: Array,
-  rooms: Array,
-  days: Array,
-  lockDay: Boolean,
-  lockTime: Boolean,
-  currentTermSemester: String,
-  currentTermId: String
-})
+/* -------------------------------------------------- */
+/* PROPS & EMITS */
+/* -------------------------------------------------- */
+const props = defineProps<{
+  modelValue: boolean
+  role: string
+  mode: "CREATE" | "MOVE" | "RESIZE"
+  payload: any
+  classes: any[]
+  subjects: any[]
+  classSubjects: any[]
+  faculty: any[]
+  rooms: any[]
+  periods: any[]
+  days: { value: string; label: string }[]
+  lockDay: boolean
+  lockTime: boolean
+  currentTermSemester: string | null
+  currentTermId: string | null
+}>()
 
 const emit = defineEmits(["update:modelValue", "save"])
 
 const scheduleStore = useScheduleStore()
 
-//
-// Safe casts
-//
-const classesSafe = computed(() => props.classes as ClassItem[] ?? [])
-const subjectsSafe = computed(() => props.subjects as SubjectItem[] ?? [])
-const facultySafe = computed(() => props.faculty as any[] ?? [])
-const periodsSafe = computed(() => props.periods as PeriodItem[] ?? [])
-const roomsSafe = computed(() => props.rooms as any[] ?? [])
-const daysSafe = computed(
-  () =>
-    (props.days as { value: string; label: string }[]) ?? [
-      { value: "MONDAY", label: "Mon" },
-      { value: "TUESDAY", label: "Tue" },
-      { value: "WEDNESDAY", label: "Wed" },
-      { value: "THURSDAY", label: "Thu" },
-      { value: "FRIDAY", label: "Fri" },
-      { value: "SATURDAY", label: "Sat" }
-    ]
-)
+/* -------------------------------------------------- */
+/* SAFE DATA */
+/* -------------------------------------------------- */
+const classesSafe = computed(() => props.classes ?? [])
+const subjectsSafe = computed(() => props.subjects ?? [])
+const facultySafe = computed(() => props.faculty ?? [])
+const roomsSafe = computed(() => props.rooms ?? [])
+const periodsSafe = computed(() => props.periods ?? [])
+const daysSafe = computed(() => props.days ?? [])
 
-//
-// Local model
-//
+/* -------------------------------------------------- */
+/* LOCAL MODEL */
+/* -------------------------------------------------- */
 const local = ref({
   id: null as string | null,
   class_id: null as string | null,
@@ -269,34 +224,33 @@ const local = ref({
   day: null as string | null,
   period_start_id: null as string | null,
   period_end_id: null as string | null,
-  academic_term_id: props.currentTermId ?? null
+  academic_term_id: props.currentTermId
 })
 
-//
-// Label formatters — rewritten for Vuetify type compatibility
-//
+/* -------------------------------------------------- */
+/* LABEL HELPERS */
+/* -------------------------------------------------- */
 const classLabel = (c: any) =>
-  `${c?.class_name ?? ""} ${c?.year_level_label ?? ""} - ${c?.section ?? ""}`
+  `${c.class_name} ${c.year_level_label} - ${c.section}`
 
 const subjectLabel = (s: any) =>
-  `${s?.course_code ?? ""} — ${s?.description ?? ""}`
+  `${s.course_code} — ${s.description}`
 
 const periodLabel = (p: any) =>
-  p?.label ?? `${p?.start_time ?? ""} - ${p?.end_time ?? ""}`
+  `${p.start_time} - ${p.end_time}`
 
-const dayLabel = (d: any) => d?.label ?? ""
-
+/* -------------------------------------------------- */
+/* MODE */
+/* -------------------------------------------------- */
 const modeItems = [
   { value: "F2F", label: "Face to Face" },
   { value: "ONLINE", label: "Online" },
   { value: "ASYNC", label: "Asynchronous" }
 ]
 
-const modeLabel = (m: any) => m?.label ?? ""
-
-//
-// Faculty list
-//
+/* -------------------------------------------------- */
+/* FACULTY DISPLAY */
+/* -------------------------------------------------- */
 const facultyList = computed(() =>
   facultySafe.value.map((f: any) => ({
     ...f,
@@ -304,51 +258,58 @@ const facultyList = computed(() =>
   }))
 )
 
-//
-// Room rule
-//
-const roomDisabled = computed(() => local.value.mode !== "F2F")
-
-watch(
-  () => local.value.mode,
-  m => {
-    if (m !== "F2F") local.value.room_id = null
-  }
+/* -------------------------------------------------- */
+/* LOCK RULES (CRITICAL) */
+/* -------------------------------------------------- */
+const classDisabled = computed(() =>
+  props.mode !== "CREATE"
 )
 
-//
-// Subject filtering — fully typed and correct
-//
-const filteredSubjects = computed((): SubjectItem[] => {
+const subjectDisabled = computed(() =>
+  props.role === "ADMIN"
+)
+
+const facultyDisabled = computed(() =>
+  props.role === "ADMIN"
+)
+
+const modeDisabled = computed(() =>
+  props.role === "ADMIN"
+)
+
+const dayDisabled = computed(() =>
+  props.lockDay
+)
+
+const timeDisabled = computed(() =>
+  props.lockTime
+)
+
+const roomDisabled = computed(() =>
+  local.value.mode !== "F2F"
+)
+
+/* -------------------------------------------------- */
+/* SUBJECT FILTER */
+/* -------------------------------------------------- */
+const filteredSubjects = computed(() => {
   if (!local.value.class_id) return []
 
   const cls = classesSafe.value.find(c => c.id === local.value.class_id)
   if (!cls) return []
 
-  const classYear = cls.year_level_number
-  const termSemester = props.currentTermSemester ?? null
-
-  let eligible = subjectsSafe.value.filter(
-    s => s.year_level_number === classYear && s.semester === termSemester
-  )
-
-  const overrideIds = (props.classSubjects as ClassSubjectMap[] ?? [])
-    .filter(cs => cs.class_id === cls.id && cs.academic_term_id === props.currentTermId)
-    .map(cs => cs.subject_id)
-
-  const overrideSubs = subjectsSafe.value.filter(s =>
-    overrideIds.includes(s.id)
-  )
-
-  return [...eligible, ...overrideSubs].filter(
-    (v, i, arr) => arr.findIndex(x => x.id === v.id) === i
+  return subjectsSafe.value.filter(
+    s =>
+      s.year_level_number === cls.year_level_number &&
+      s.semester === props.currentTermSemester
   )
 })
 
-//
-// Header title
-//
+/* -------------------------------------------------- */
+/* HEADER & SUMMARY */
+/* -------------------------------------------------- */
 const isEdit = computed(() => !!local.value.id)
+
 const headerTitle = computed(() =>
   props.mode === "MOVE"
     ? "Move Schedule"
@@ -359,167 +320,122 @@ const headerTitle = computed(() =>
     : "Create Schedule"
 )
 
-//
-// Summary label
-//
 const summaryLabel = computed(() => {
   if (!local.value.day || !local.value.period_start_id) return ""
-  const dayTxt = daysSafe.value.find(d => d.value === local.value.day)?.label
-  const start = periodsSafe.value.find(p => p.id === local.value.period_start_id)
-  if (!start) return dayTxt ?? ""
-  return `${dayTxt} · ${periodLabel(start)}`
+  const day = daysSafe.value.find(d => d.value === local.value.day)?.label
+  const p = periodsSafe.value.find(p => p.id === local.value.period_start_id)
+  return `${day} · ${periodLabel(p)}`
 })
 
-//
-// Validation
-//
+/* -------------------------------------------------- */
+/* VALIDATION */
+/* -------------------------------------------------- */
 const validationMessage = computed(() => {
-  if (!local.value.class_id) return "Please select a class."
-  if (!local.value.subject_id) return "Please select a subject."
-  if (!local.value.day) return "Please select a day."
+  if (!local.value.class_id) return "Class is required."
+  if (!local.value.subject_id) return "Subject is required."
+  if (!local.value.day) return "Day is required."
+  if (!local.value.period_start_id || !local.value.period_end_id)
+    return "Start and end time are required."
 
   const start = periodsSafe.value.find(p => p.id === local.value.period_start_id)
   const end = periodsSafe.value.find(p => p.id === local.value.period_end_id)
-  if (!start || !end) return "Please select start and end time."
 
+  if (!start || !end) return "Invalid period selection."
   if (start.slot_index > end.slot_index)
     return "End time must be after start time."
 
   if (local.value.mode !== "F2F" && local.value.room_id)
-    return "Rooms are only allowed for Face-to-Face mode."
+    return "Room is only allowed for Face-to-Face mode."
 
   return ""
 })
 
 const isValid = computed(() => validationMessage.value === "")
 
-//
-// Watch payload
-//
+/* -------------------------------------------------- */
+/* PAYLOAD WATCH */
+/* -------------------------------------------------- */
 watch(
   () => props.payload,
   val => {
-    if (!val) {
-      local.value = {
-        id: null,
-        class_id: null,
-        subject_id: null,
-        faculty_id: null,
-        room_id: null,
-        mode: "F2F",
-        day: null,
-        period_start_id: null,
-        period_end_id: null,
-        academic_term_id: props.currentTermId ?? null
-      }
-      return
-    }
-
+    if (!val) return
     local.value = {
       id: val.id ?? null,
       class_id: val.class_id ?? null,
       subject_id: val.subject_id ?? null,
       faculty_id: val.faculty_id ?? null,
-      room_id: val.mode === "F2F" ? val.room_id ?? null : null,
+      room_id: val.room_id ?? null,
       mode: val.mode ?? "F2F",
       day: val.day ?? null,
-      period_start_id:
-        val.period_start_id ??
-        val.period_start?.id ??
-        periodsSafe.value.find(p => p.slot_index === val.startSlot)?.id ??
-        null,
-      period_end_id:
-        val.period_end_id ??
-        val.period_end?.id ??
-        periodsSafe.value.find(p => p.slot_index === val.endSlot)?.id ??
-        null,
-      academic_term_id: props.currentTermId ?? val.academic_term_id ?? null
+      period_start_id: val.period_start_id ?? val.period_start?.id ?? null,
+      period_end_id: val.period_end_id ?? val.period_end?.id ?? null,
+      academic_term_id: props.currentTermId
     }
   },
   { immediate: true }
 )
 
-//
-// Save button handler
-//
+/* -------------------------------------------------- */
+/* SAVE */
+/* -------------------------------------------------- */
 const saving = ref(false)
-const snackbar = ref({ show: false, message: "", timeout: 6000 })
+const snackbar = ref({ show: false, message: "", timeout: 4000 })
 
-async function handleSaveClick() {
+async function handleSave() {
   if (!isValid.value) {
-    snackbar.value = {
-      show: true,
-      message: validationMessage.value,
-      timeout: 5000
-    }
+    snackbar.value = { show: true, message: validationMessage.value, timeout: 5000 }
     return
   }
 
   saving.value = true
-
   try {
-    const payload = {
-      id: local.value.id ?? undefined,
-      class_id: local.value.class_id,
-      subject_id: local.value.subject_id,
-      faculty_id: local.value.faculty_id ?? null,
-      room_id: local.value.mode === "F2F" ? local.value.room_id ?? null : null,
-      day: local.value.day,
-      period_start_id: local.value.period_start_id,
-      period_end_id: local.value.period_end_id,
-      academic_term_id: local.value.academic_term_id,
-      mode: local.value.mode,
-      force: false
-    }
+const res = await scheduleStore.saveSchedule({
+  ...local.value,
+  force: false
+})
 
-    const res: any = await scheduleStore.saveSchedule(payload)
+if (res && "requires_force" in res && res.requires_force) {
+  const { classConflicts, facultyConflicts, roomConflicts } =
+    res.conflicts?.details ?? {}
 
-    if (res?.conflict) {
-      snackbar.value = {
-        show: true,
-        message: "⛔ Conflict detected. Please resolve or force replace.",
-        timeout: 7000
-      }
-      return
-    }
+  let msg = "⛔ Conflict detected."
+
+  if (classConflicts?.length) msg += " Class conflict."
+  if (facultyConflicts?.length) msg += " Faculty conflict."
+  if (roomConflicts?.length) msg += " Room conflict."
+
+  snackbar.value = {
+    show: true,
+    message: msg,
+    timeout: 8000
+  }
+  return
+}
+
 
     snackbar.value = {
       show: true,
-      message: local.value.id
-        ? "Successfully updated schedule."
-        : "Successfully saved schedule.",
+      message: isEdit.value ? "Schedule updated." : "Schedule created.",
       timeout: 3000
     }
 
-    setTimeout(() => close(), 300)
-
-  } catch (err: any) {
-    const msg =
-      err?.data?.message ||
-      err?.message ||
-      "Failed to save schedule."
-
+    emit("save")
+    close()
+  } catch (e: any) {
     snackbar.value = {
       show: true,
-      message: msg,
+      message: e?.message ?? "Failed to save schedule.",
       timeout: 7000
     }
-
-    console.error("Schedule save error:", err)
   } finally {
     saving.value = false
   }
 }
 
-
-
 function close() {
   emit("update:modelValue", false)
 }
 
-//
-// Drawer binding
-//
 const drawerModel = computed({
   get: () => props.modelValue,
   set: v => emit("update:modelValue", v)

@@ -1,86 +1,84 @@
 <template>
   <div class="schedule-calendar">
-    <!-- Header -->
+
+    <!-- LEGEND -->
+    <div class="legend">
+      <span class="legend-item f2f">Face to Face</span>
+      <span class="legend-item online">Online</span>
+      <span class="legend-item async">Asynchronous</span>
+    </div>
+
+    <!-- HEADER -->
     <div class="calendar-header">
       <div class="time-column"></div>
-      <div v-for="day in days" :key="day.value" class="day-header">
-        {{ day.label }}
+      <div v-for="d in days" :key="d.value" class="day-header">
+        {{ d.label }}
       </div>
     </div>
 
-    <!-- Grid -->
+    <!-- GRID -->
     <div class="calendar-grid">
-      <!-- Time Column -->
+
+      <!-- TIME -->
       <div class="time-column">
         <div
-          v-for="slot in periods"
-          :key="slot.id"
+          v-for="p in periods"
+          :key="p.id"
           class="time-label"
         >
-          {{ formatTime(slot.start_time) }} – {{ formatTime(slot.end_time) }}
+          {{ formatRange(p.start_time, p.end_time) }}
         </div>
       </div>
 
-      <!-- Day Columns -->
+      <!-- DAYS -->
       <div class="calendar-columns">
         <div
           v-for="day in days"
           :key="day.value"
           class="day-column"
-          @mousedown="startNewDrag(day.value, $event)"
-          @mouseup="finishDrag"
+          @mousedown="startCreate(day.value, $event)"
           @mousemove="dragMove"
+          @mouseup="finishDrag"
         >
-          <!-- Base grid -->
+
+          <!-- GRID CELLS -->
           <div
-            v-for="slot in periods"
-            :key="slot.id"
+            v-for="p in periods"
+            :key="p.id"
             class="grid-cell"
           />
 
-          <!-- Events -->
+          <!-- EVENTS -->
           <div
-            v-for="ev in eventsByDay[day.value] || []"
+            v-for="ev in eventsByDay[day.value]"
             :key="ev.id"
             class="event"
+            :class="modeClass(ev.mode)"
             :style="eventStyle(ev)"
             @mousedown.stop="startMove(ev, day.value)"
-            @dblclick.stop="openEditor(ev)"
+            @dblclick.stop="emit('open-editor', { id: ev.id })"
           >
-            <div class="event-title">
-              {{ ev.subject_code }}
-            </div>
-
-            <div class="event-desc">
-              {{ ev.subject_desc }}
-            </div>
-
+            <div class="event-code">{{ ev.subject?.course_code }}</div>
+            <div class="event-title">{{ ev.subject?.description }}</div>
             <div class="event-meta">
               {{ modeLabel(ev.mode) }}
-              <span v-if="ev.faculty_name"> • {{ ev.faculty_name }}</span>
+              <span v-if="ev.faculty">
+                · {{ ev.faculty.last_name }}, {{ ev.faculty.first_name }}
+              </span>
             </div>
 
-            <!-- Resize Handles -->
-            <div
-              class="resize-handle top"
-              @mousedown.stop="startResize(ev, day.value, 'top', $event)"
-            />
-            <div
-              class="resize-handle bottom"
-              @mousedown.stop="startResize(ev, day.value, 'bottom', $event)"
-            />
+            <!-- RESIZE -->
+            <div class="resize top" @mousedown.stop="startResize(ev, day.value, 'top')" />
+            <div class="resize bottom" @mousedown.stop="startResize(ev, day.value, 'bottom')" />
           </div>
 
-          <!-- Drag Preview -->
+          <!-- PREVIEW -->
           <div
-            v-if="previewBlock && dragState?.day === day.value"
-            class="preview-event"
-            :style="previewBlock.style"
-          >
-            {{ formatTime(periods[dragMin]?.start_time ?? "") }}
-            –
-            {{ formatTime(periods[dragMax]?.end_time ?? "") }}
-          </div>
+            v-if="preview && dragDay === day.value"
+            class="preview"
+            :class="{ conflict: previewConflict }"
+            :style="previewStyle"
+          />
         </div>
       </div>
     </div>
@@ -88,245 +86,216 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue"
+import { ref, computed } from "vue"
 import type { CSSProperties } from "vue"
 
-const emit = defineEmits<{
-  (e: "create-range", payload: { day: string; period_start_id: string; period_end_id: string }): void
-  (e: "event-drop", payload: { id: string; day: string; period_start_id: string; period_end_id: string }): void
-  (e: "open-editor", payload: { id: string }): void
-}>()
+const emit = defineEmits(["create-range", "event-drop", "open-editor", "conflict"])
 
 const props = defineProps<{
   days: { label: string; value: string }[]
   periods: { id: string; start_time: string; end_time: string; slot_index: number }[]
-  events?: any[]
+  events: any[]
 }>()
 
-/* ---------------- EVENTS BY DAY ---------------- */
+/* ---------------- DATA ---------------- */
+const rowHeight = 50
+const dragging = ref(false)
+const dragMode = ref<"CREATE" | "MOVE" | "RESIZE" | null>(null)
+const dragEvent = ref<any>(null)
+const dragDay = ref<string | null>(null)
+const startSlot = ref(0)
+const endSlot = ref(0)
+const resizeSide = ref<"top" | "bottom" | null>(null)
+
+/* ---------------- COMPUTED ---------------- */
 const eventsByDay = computed(() => {
   const map: Record<string, any[]> = {}
   props.days.forEach(d => (map[d.value] = []))
-  ;(props.events ?? []).forEach(ev => ev?.day && map[ev.day]?.push(ev))
+  props.events.forEach(ev => map[ev.day]?.push(ev))
   return map
 })
 
-/* ---------------- DRAG STATE ---------------- */
-const dragState = ref<null | { day: string; startSlot: number; event?: any }>(null)
-const dragMode = ref<"CREATE" | "MOVE" | "RESIZE">("CREATE")
-const dragging = ref(false)
-const dragMin = ref(-1)
-const dragMax = ref(-1)
-const resizeSide = ref<"top" | "bottom" | null>(null)
-
-const previewBlock = ref<{ style: Record<string, string> } | null>(null)
-
 /* ---------------- HELPERS ---------------- */
-const getSlotHeight = () =>
-  (document.querySelector(".grid-cell") as HTMLElement)?.offsetHeight ?? 50
-
-const safeTarget = (e: MouseEvent) =>
-  e.target instanceof HTMLElement ? e.target : null
-
-function getSlot(evt: MouseEvent) {
-  const col = safeTarget(evt)?.closest(".day-column") as HTMLElement
-  if (!col) return -1
-  return Math.floor((evt.clientY - col.getBoundingClientRect().top) / getSlotHeight())
+function getSlot(e: MouseEvent, col: HTMLElement) {
+  const y = e.clientY - col.getBoundingClientRect().top
+  return Math.max(0, Math.min(props.periods.length - 1, Math.floor(y / rowHeight)))
 }
+
+function hasConflict(day: string, s: number, e: number, ignoreId?: string) {
+  const list = eventsByDay.value[day]
+  if (!list) return false
+
+  return list.some(ev =>
+    ev.id !== ignoreId &&
+    !(e < ev.startSlot || s > ev.endSlot)
+  )
+}
+
 
 /* ---------------- CREATE ---------------- */
-function startNewDrag(day: string, evt: MouseEvent) {
-  if (!safeTarget(evt)?.closest(".grid-cell")) return
-  const slot = getSlot(evt)
-  dragState.value = { day, startSlot: slot }
+function startCreate(day: string, e: MouseEvent) {
+  if (!(e.target as HTMLElement).classList.contains("grid-cell")) return
+  dragging.value = true
   dragMode.value = "CREATE"
-  dragging.value = true
-  dragMin.value = dragMax.value = slot
+  dragDay.value = day
+  startSlot.value = endSlot.value = getSlot(e, e.currentTarget as HTMLElement)
 }
 
-/* ---------------- MOVE / RESIZE ---------------- */
+/* ---------------- MOVE ---------------- */
 function startMove(ev: any, day: string) {
-  dragState.value = { day, startSlot: ev.startSlot, event: ev }
+  dragging.value = true
   dragMode.value = "MOVE"
-  dragging.value = true
-  dragMin.value = ev.startSlot
-  dragMax.value = ev.endSlot
+  dragEvent.value = ev
+  dragDay.value = day
+  startSlot.value = ev.startSlot
+  endSlot.value = ev.endSlot
 }
 
-function startResize(ev: any, day: string, side: "top" | "bottom", evt: MouseEvent) {
-  dragState.value = { day, startSlot: ev.startSlot, event: ev }
+/* ---------------- RESIZE ---------------- */
+function startResize(ev: any, day: string, side: "top" | "bottom") {
+  dragging.value = true
   dragMode.value = "RESIZE"
+  dragEvent.value = ev
+  dragDay.value = day
   resizeSide.value = side
-  dragging.value = true
-  dragMin.value = ev.startSlot
-  dragMax.value = ev.endSlot
+  startSlot.value = ev.startSlot
+  endSlot.value = ev.endSlot
 }
 
-function dragMove(evt: MouseEvent) {
-  if (!dragState.value) return
-  const slot = Math.max(0, Math.min(getSlot(evt), props.periods.length - 1))
+/* ---------------- DRAG ---------------- */
+function dragMove(e: MouseEvent) {
+  if (!dragging.value || !dragDay.value) return
+  const col = (e.target as HTMLElement).closest(".day-column") as HTMLElement
+  if (!col) return
+  const slot = getSlot(e, col)
 
   if (dragMode.value === "RESIZE") {
-    if (resizeSide.value === "top") dragMin.value = Math.min(slot, dragMax.value - 1)
-    else dragMax.value = Math.max(slot, dragMin.value + 1)
+    resizeSide.value === "top"
+      ? startSlot.value = Math.min(slot, endSlot.value - 1)
+      : endSlot.value = Math.max(slot, startSlot.value + 1)
   } else {
-    dragMin.value = Math.min(dragState.value.startSlot, slot)
-    dragMax.value = Math.max(dragState.value.startSlot, slot)
-  }
-
-  const h = getSlotHeight()
-  previewBlock.value = {
-    style: {
-      top: `${dragMin.value * h}px`,
-      height: `${(dragMax.value - dragMin.value + 1) * h}px`
-    }
+    endSlot.value = slot
   }
 }
 
+/* ---------------- DROP ---------------- */
 function finishDrag() {
-  if (!dragState.value) return resetDrag()
+  if (!dragging.value || !dragDay.value) return reset()
 
-  const start = props.periods[dragMin.value]
-  const end = props.periods[dragMax.value]
-  if (!start || !end) return resetDrag()
+  const s = Math.min(startSlot.value, endSlot.value)
+  const e = Math.max(startSlot.value, endSlot.value)
 
-  if (dragMode.value === "CREATE") {
-    emit("create-range", { day: dragState.value.day, period_start_id: start.id, period_end_id: end.id })
+  const conflict = hasConflict(dragDay.value, s, e, dragEvent.value?.id)
+  if (conflict) {
+    emit("conflict")
+    return reset()
   }
 
-  if (dragState.value.event) {
-    emit("event-drop", {
-      id: dragState.value.event.id,
-      day: dragState.value.day,
-      period_start_id: start.id,
-      period_end_id: end.id
-    })
-  }
+  const startP = props.periods[s]
+const endP = props.periods[e]
 
-  resetDrag()
+// ✅ HARD GUARD (required)
+if (!startP || !endP || !dragDay.value) {
+  reset()
+  return
 }
 
-function resetDrag() {
-  dragState.value = null
+if (dragMode.value === "CREATE") {
+  emit("create-range", {
+    day: dragDay.value,
+    period_start_id: startP.id,
+    period_end_id: endP.id
+  })
+} else if (dragEvent.value) {
+  emit("event-drop", {
+    id: dragEvent.value.id,
+    day: dragDay.value,
+    period_start_id: startP.id,
+    period_end_id: endP.id
+  })
+}
+
+
+  reset()
+}
+
+function reset() {
   dragging.value = false
+  dragMode.value = null
+  dragEvent.value = null
+  dragDay.value = null
   resizeSide.value = null
-  previewBlock.value = null
-  dragMin.value = dragMax.value = -1
 }
 
-/* ---------------- DISPLAY ---------------- */
-function eventStyle(ev: any): CSSProperties {
-  const h = getSlotHeight()
-  const color =
-    ev.mode === "F2F" ? "#fbc02d" :
-    ev.mode === "ASYNC" ? "#43a047" :
-    "#1e88e5"
+/* ---------------- STYLES ---------------- */
+const preview = computed(() => dragging.value)
+const previewConflict = computed(() =>
+  dragDay.value
+    ? hasConflict(dragDay.value, startSlot.value, endSlot.value, dragEvent.value?.id)
+    : false
+)
 
+const previewStyle = computed<CSSProperties>(() => ({
+  top: `${Math.min(startSlot.value, endSlot.value) * rowHeight}px`,
+  height: `${(Math.abs(endSlot.value - startSlot.value) + 1) * rowHeight}px`
+}))
+
+function eventStyle(ev: any): CSSProperties {
   return {
-    top: `${ev.startSlot * h}px`,
-    height: `${(ev.endSlot - ev.startSlot + 1) * h}px`,
-    background: color
+    top: `${ev.startSlot * rowHeight}px`,
+    height: `${(ev.endSlot - ev.startSlot + 1) * rowHeight}px`
   }
 }
 
-function modeLabel(mode: string) {
-  return mode === "F2F" ? "Face-to-Face" : mode === "ASYNC" ? "Asynchronous" : "Online"
+/* ---------------- FORMAT ---------------- */
+function formatRange(s: string, e: string) {
+  return `${fmt(s)} – ${fmt(e)}`
 }
-
-function formatTime(t: string) {
+function fmt(t: string) {
   const [h, m] = t.split(":")
   const hh = Number(h)
   return `${hh % 12 || 12}:${m} ${hh >= 12 ? "PM" : "AM"}`
 }
 
-function openEditor(ev: any) {
-  emit("open-editor", { id: ev.id })
+function modeClass(m: string) {
+  return m === "F2F" ? "f2f" : m === "ASYNC" ? "async" : "online"
 }
-
-onMounted(() => window.addEventListener("keydown", e => e.key === "Escape" && resetDrag()))
-onUnmounted(() => window.removeEventListener("keydown", resetDrag))
+function modeLabel(m: string) {
+  return m === "F2F" ? "Face to Face" : m === "ASYNC" ? "Asynchronous" : "Online"
+}
 </script>
 
 <style scoped>
-.schedule-calendar {
-  width: 100%;
-}
+/* EXACT UI YOU LIKE */
+.legend { display:flex; gap:12px; margin-bottom:10px }
+.legend-item { padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600 }
+.f2f{background:#fbc02d;color:#000}
+.online{background:#1e88e5;color:#fff}
+.async{background:#43a047;color:#fff}
 
-.calendar-header {
-  display: grid;
-  grid-template-columns: 110px repeat(6, 1fr);
-  font-weight: 600;
-}
+.calendar-header{display:grid;grid-template-columns:120px repeat(6,1fr)}
+.day-header{text-align:center;font-weight:600}
+.calendar-grid{display:flex}
+.time-column{width:120px}
+.time-label{height:50px;font-size:11px;display:flex;align-items:center;justify-content:center}
 
-.time-column {
-  width: 110px;
-}
+.calendar-columns{display:grid;grid-template-columns:repeat(6,1fr);flex:1}
+.day-column{position:relative}
+.grid-cell{height:50px;border-bottom:1px solid #e0f2e9}
 
-.time-label {
-  height: 50px;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  padding-left: 6px;
-}
+.event{position:absolute;left:4px;right:4px;border-radius:8px;padding:6px;color:#fff;font-size:12px;cursor:pointer}
+.event.f2f{background:#fbc02d;color:#000}
+.event.online{background:#1e88e5}
+.event.async{background:#43a047}
 
-.calendar-columns {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-}
+.event-code{font-weight:700}
+.event-title{font-size:11px}
+.event-meta{font-size:10px;opacity:.9}
 
-.day-column {
-  position: relative;
-  border-left: 1px solid #dcedc8;
-}
+.resize{position:absolute;left:0;right:0;height:6px;cursor:row-resize}
+.resize.top{top:-3px}
+.resize.bottom{bottom:-3px}
 
-.grid-cell {
-  height: 50px;
-  border-bottom: 1px solid #e8f5e9;
-}
-
-.event {
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  padding: 6px;
-  color: #fff;
-  border-radius: 8px;
-  font-size: 12px;
-  box-sizing: border-box;
-}
-
-.event-title {
-  font-weight: 700;
-}
-
-.event-desc {
-  font-size: 11px;
-  opacity: 0.95;
-}
-
-.event-meta {
-  font-size: 10px;
-  margin-top: 2px;
-  opacity: 0.9;
-}
-
-.resize-handle {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 6px;
-  cursor: row-resize;
-}
-.resize-handle.top { top: -3px; }
-.resize-handle.bottom { bottom: -3px; }
-
-.preview-event {
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  border: 2px dashed #2196f3;
-  background: rgba(33,150,243,.15);
-  border-radius: 6px;
-}
+.preview{position:absolute;left:4px;right:4px;border:2px dashed #2196f3;background:rgba(33,150,243,.15);border-radius:8px}
+.preview.conflict{border-color:red;background:rgba(255,0,0,.15)}
 </style>

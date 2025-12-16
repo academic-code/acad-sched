@@ -178,15 +178,25 @@ const calendarEvents = computed(() =>
     day: s.day,
     startSlot: s.period_start?.slot_index ?? 0,
     endSlot: s.period_end?.slot_index ?? 0,
-
-    subject_code: s.subject?.course_code ?? "",
-    subject_desc: s.subject?.description ?? "",
     mode: s.mode,
-    faculty_name: s.faculty
-      ? `${s.faculty.last_name}, ${s.faculty.first_name}`
+
+    // ✅ RESTORE NESTED OBJECTS (THIS FIXES EVERYTHING)
+    subject: s.subject
+      ? {
+          course_code: s.subject.course_code,
+          description: s.subject.description
+        }
+      : null,
+
+    faculty: s.faculty
+      ? {
+          first_name: s.faculty.first_name,
+          last_name: s.faculty.last_name
+        }
       : null
   }))
 )
+
 
 const targetLabel = computed(() =>
   ({ CLASS: "Class", FACULTY: "Faculty", ROOM: "Room" }[viewMode.value])

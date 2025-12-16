@@ -12,8 +12,12 @@
     <div class="calendar-grid">
       <!-- Time Column -->
       <div class="time-column">
-        <div v-for="slot in periods" :key="slot.id" class="time-label">
-          {{ formatTime(slot.start_time) }}
+        <div
+          v-for="slot in periods"
+          :key="slot.id"
+          class="time-label"
+        >
+          {{ formatTime(slot.start_time) }} – {{ formatTime(slot.end_time) }}
         </div>
       </div>
 
@@ -27,41 +31,44 @@
           @mouseup="finishDrag"
           @mousemove="dragMove"
         >
-
           <!-- Base grid -->
           <div
             v-for="slot in periods"
             :key="slot.id"
             class="grid-cell"
-          ></div>
-
-          <!-- Highlight overlay -->
-          <div
-            v-if="dragging && dragState?.day === day.value"
-            class="highlight-block"
-            :style="{
-              top: `${dragMin * getSlotHeight()}px`,
-              height: `${(dragMax - dragMin + 1) * getSlotHeight()}px`
-            }"
-          ></div>
+          />
 
           <!-- Events -->
           <div
-            v-for="ev in (eventsByDay[String(day.value)] || [])"
+            v-for="ev in eventsByDay[day.value] || []"
             :key="ev.id"
             class="event"
             :style="eventStyle(ev)"
+            @mousedown.stop="startMove(ev, day.value)"
+            @dblclick.stop="openEditor(ev)"
           >
-            <span
-              class="event-label"
-              @mousedown.stop="startMove(ev, day.value)"
-              @dblclick.stop="openEditor(ev)"
-            >
-              {{ ev.label }}
-            </span>
+            <div class="event-title">
+              {{ ev.subject_code }}
+            </div>
 
-            <div class="resize-handle top" @mousedown.stop="startResize(ev, day.value, 'top', $event)"></div>
-            <div class="resize-handle bottom" @mousedown.stop="startResize(ev, day.value, 'bottom', $event)"></div>
+            <div class="event-desc">
+              {{ ev.subject_desc }}
+            </div>
+
+            <div class="event-meta">
+              {{ modeLabel(ev.mode) }}
+              <span v-if="ev.faculty_name"> • {{ ev.faculty_name }}</span>
+            </div>
+
+            <!-- Resize Handles -->
+            <div
+              class="resize-handle top"
+              @mousedown.stop="startResize(ev, day.value, 'top', $event)"
+            />
+            <div
+              class="resize-handle bottom"
+              @mousedown.stop="startResize(ev, day.value, 'bottom', $event)"
+            />
           </div>
 
           <!-- Drag Preview -->
@@ -70,8 +77,8 @@
             class="preview-event"
             :style="previewBlock.style"
           >
-            {{ dragMode === "MOVE" ? "Move:" : "New Time Schedule:" }}
-            {{ formatTime(periods[dragMin]?.start_time ?? "") }} -
+            {{ formatTime(periods[dragMin]?.start_time ?? "") }}
+            –
             {{ formatTime(periods[dragMax]?.end_time ?? "") }}
           </div>
         </div>
@@ -96,6 +103,7 @@ const props = defineProps<{
   events?: any[]
 }>()
 
+/* ---------------- EVENTS BY DAY ---------------- */
 const eventsByDay = computed(() => {
   const map: Record<string, any[]> = {}
   props.days.forEach(d => (map[d.value] = []))
@@ -103,270 +111,205 @@ const eventsByDay = computed(() => {
   return map
 })
 
+/* ---------------- DRAG STATE ---------------- */
 const dragState = ref<null | { day: string; startSlot: number; event?: any }>(null)
-type DragMode = "CREATE" | "MOVE" | "RESIZE"
-const dragMode = ref<DragMode>("CREATE")
-
-const previewBlock = ref<{ style: Record<string, string>; class?: string } | null>(null)
+const dragMode = ref<"CREATE" | "MOVE" | "RESIZE">("CREATE")
 const dragging = ref(false)
 const dragMin = ref(-1)
 const dragMax = ref(-1)
 const resizeSide = ref<"top" | "bottom" | null>(null)
 
-const safeTarget = (evt: MouseEvent) =>
-  evt.target instanceof HTMLElement ? evt.target : null
+const previewBlock = ref<{ style: Record<string, string> } | null>(null)
 
-const getSlotHeight = () => {
-  const el = document.querySelector(".grid-cell") as HTMLElement | null
-  return el?.offsetHeight ?? 50
+/* ---------------- HELPERS ---------------- */
+const getSlotHeight = () =>
+  (document.querySelector(".grid-cell") as HTMLElement)?.offsetHeight ?? 50
+
+const safeTarget = (e: MouseEvent) =>
+  e.target instanceof HTMLElement ? e.target : null
+
+function getSlot(evt: MouseEvent) {
+  const col = safeTarget(evt)?.closest(".day-column") as HTMLElement
+  if (!col) return -1
+  return Math.floor((evt.clientY - col.getBoundingClientRect().top) / getSlotHeight())
 }
 
-function getSlot(evt: MouseEvent): number {
-  const target = safeTarget(evt)
-  const column = target?.closest(".day-column") as HTMLElement | null
-  if (!column) return -1
-  const height = getSlotHeight()
-  return Math.floor((evt.clientY - column.getBoundingClientRect().top) / height)
-}
-
+/* ---------------- CREATE ---------------- */
 function startNewDrag(day: string, evt: MouseEvent) {
-  if (!(safeTarget(evt)?.closest(".grid-cell"))) return
+  if (!safeTarget(evt)?.closest(".grid-cell")) return
   const slot = getSlot(evt)
-  dragMode.value = "CREATE"
   dragState.value = { day, startSlot: slot }
+  dragMode.value = "CREATE"
   dragging.value = true
-  dragMin.value = slot
-  dragMax.value = slot
+  dragMin.value = dragMax.value = slot
 }
 
-function openEditor(ev: any) {
-  emit("open-editor", { id: ev.id })
-}
-
+/* ---------------- MOVE / RESIZE ---------------- */
 function startMove(ev: any, day: string) {
+  dragState.value = { day, startSlot: ev.startSlot, event: ev }
   dragMode.value = "MOVE"
-  dragState.value = { day, startSlot: ev.startSlot, event: ev }
   dragging.value = true
   dragMin.value = ev.startSlot
   dragMax.value = ev.endSlot
 }
 
-function startResize(ev: any, day: string, direction: "top" | "bottom", evt: MouseEvent) {
+function startResize(ev: any, day: string, side: "top" | "bottom", evt: MouseEvent) {
+  dragState.value = { day, startSlot: ev.startSlot, event: ev }
   dragMode.value = "RESIZE"
-  dragState.value = { day, startSlot: ev.startSlot, event: ev }
+  resizeSide.value = side
   dragging.value = true
-  resizeSide.value = direction
   dragMin.value = ev.startSlot
   dragMax.value = ev.endSlot
-}
-
-let scrollInterval: any = null
-function enableAutoScroll(evt: MouseEvent) {
-  clearInterval(scrollInterval)
-  const threshold = 60
-  const speed = 6
-  scrollInterval = setInterval(() => {
-    if (evt.clientY < threshold) window.scrollBy(0, -speed)
-    if (evt.clientY > window.innerHeight - threshold) window.scrollBy(0, speed)
-  }, 16)
 }
 
 function dragMove(evt: MouseEvent) {
   if (!dragState.value) return
-  enableAutoScroll(evt)
-
-  const target = safeTarget(evt)
-  const column = target?.closest(".day-column") as HTMLElement | null
-  if (!column) return
-
-  const height = getSlotHeight()
-  const slot = Math.floor((evt.clientY - column.getBoundingClientRect().top) / height)
-  const clamped = Math.max(0, Math.min(slot, props.periods.length - 1))
+  const slot = Math.max(0, Math.min(getSlot(evt), props.periods.length - 1))
 
   if (dragMode.value === "RESIZE") {
-    if (resizeSide.value === "top") dragMin.value = Math.min(clamped, dragMax.value - 1)
-    if (resizeSide.value === "bottom") dragMax.value = Math.max(clamped, dragMin.value + 1)
+    if (resizeSide.value === "top") dragMin.value = Math.min(slot, dragMax.value - 1)
+    else dragMax.value = Math.max(slot, dragMin.value + 1)
   } else {
-    dragMin.value = Math.min(dragState.value.startSlot, clamped)
-    dragMax.value = Math.max(dragState.value.startSlot, clamped)
+    dragMin.value = Math.min(dragState.value.startSlot, slot)
+    dragMax.value = Math.max(dragState.value.startSlot, slot)
   }
 
-  const conflict = hasConflict(dragState.value.day, dragMin.value, dragMax.value)
-
+  const h = getSlotHeight()
   previewBlock.value = {
     style: {
-      position: "absolute",
-      top: `${dragMin.value * height}px`,
-      height: `${(dragMax.value - dragMin.value + 1) * height}px`,
-      left: "0px",
-      right: "0px",
-      border: conflict ? "2px solid red" : "2px dashed #2196f3",
-      background: conflict ? "rgba(255,0,0,0.15)" : "rgba(33,150,243,0.15)"
+      top: `${dragMin.value * h}px`,
+      height: `${(dragMax.value - dragMin.value + 1) * h}px`
     }
   }
 }
 
 function finishDrag() {
-  clearInterval(scrollInterval)
+  if (!dragState.value) return resetDrag()
 
-  if (!dragState.value || dragMin.value < 0 || dragMax.value < 0) {
-    return resetDrag()
-  }
+  const start = props.periods[dragMin.value]
+  const end = props.periods[dragMax.value]
+  if (!start || !end) return resetDrag()
 
-  const conflict = hasConflict(dragState.value.day, dragMin.value, dragMax.value)
-  if (conflict) return resetDrag()
-
-  const startPeriod = props.periods[dragMin.value]
-  const endPeriod = props.periods[dragMax.value]
-
-  // ✔ FIX: Guard undefined (prevents TS18048)
-  if (!startPeriod || !endPeriod) {
-    console.warn("Invalid period index — ignored drag result")
-    return resetDrag()
-  }
-
-  // === CREATE NEW ===
   if (dragMode.value === "CREATE") {
-    emit("create-range", {
-      day: dragState.value.day,
-      period_start_id: startPeriod.id,
-      period_end_id: endPeriod.id
-    })
+    emit("create-range", { day: dragState.value.day, period_start_id: start.id, period_end_id: end.id })
   }
 
-  // === MOVE or RESIZE EXISTING ===
-  if ((dragMode.value === "MOVE" || dragMode.value === "RESIZE") && dragState.value.event) {
+  if (dragState.value.event) {
     emit("event-drop", {
-      id: String(dragState.value.event.id),
+      id: dragState.value.event.id,
       day: dragState.value.day,
-      period_start_id: startPeriod.id,
-      period_end_id: endPeriod.id
+      period_start_id: start.id,
+      period_end_id: end.id
     })
   }
 
   resetDrag()
 }
 
-
 function resetDrag() {
-  if (previewBlock.value) {
-    previewBlock.value.class = "fade-out"
-    setTimeout(() => (previewBlock.value = null), 150)
-  }
   dragState.value = null
   dragging.value = false
   resizeSide.value = null
-  dragMode.value = "CREATE"
+  previewBlock.value = null
   dragMin.value = dragMax.value = -1
 }
 
-function hasConflict(day: string, start: number, end: number) {
-  return (eventsByDay.value[day] ?? []).some(ev => !(end < ev.startSlot || start > ev.endSlot))
-}
-
-const cancelDrag = (e: KeyboardEvent) => e.key === "Escape" && resetDrag()
-onMounted(() => window.addEventListener("keydown", cancelDrag))
-onUnmounted(() => window.removeEventListener("keydown", cancelDrag))
-
+/* ---------------- DISPLAY ---------------- */
 function eventStyle(ev: any): CSSProperties {
-  const height = getSlotHeight()
+  const h = getSlotHeight()
+  const color =
+    ev.mode === "F2F" ? "#fbc02d" :
+    ev.mode === "ASYNC" ? "#43a047" :
+    "#1e88e5"
+
   return {
-    position: "absolute",
-    top: `${ev.startSlot * height}px`,
-    height: `${(ev.endSlot - ev.startSlot + 1) * height}px`,
-    left: "0px",
-    right: "0px",
-    cursor: "grab",
-    padding: "4px",
-    background: ev.subject?.is_gened ? "#ffc107" : "#1e88e5",
-    borderRadius: "6px",
-    color: "#fff",
-    boxSizing: "border-box"
+    top: `${ev.startSlot * h}px`,
+    height: `${(ev.endSlot - ev.startSlot + 1) * h}px`,
+    background: color
   }
 }
 
+function modeLabel(mode: string) {
+  return mode === "F2F" ? "Face-to-Face" : mode === "ASYNC" ? "Asynchronous" : "Online"
+}
+
 function formatTime(t: string) {
-  if (!t) return ""
   const [h, m] = t.split(":")
   const hh = Number(h)
   return `${hh % 12 || 12}:${m} ${hh >= 12 ? "PM" : "AM"}`
 }
+
+function openEditor(ev: any) {
+  emit("open-editor", { id: ev.id })
+}
+
+onMounted(() => window.addEventListener("keydown", e => e.key === "Escape" && resetDrag()))
+onUnmounted(() => window.removeEventListener("keydown", resetDrag))
 </script>
 
 <style scoped>
 .schedule-calendar {
   width: 100%;
-  user-select: none;
 }
 
-/* Header */
 .calendar-header {
   display: grid;
-  grid-template-columns: 90px repeat(6, 1fr);
+  grid-template-columns: 110px repeat(6, 1fr);
   font-weight: 600;
-  border-bottom: 1px solid #147421;
-}
-
-.day-header {
-  text-align: center;
-  padding: 4px 0;
-}
-
-/* Grid */
-.calendar-grid {
-  display: flex;
 }
 
 .time-column {
-  width: 90px;
+  width: 110px;
 }
 
 .time-label {
   height: 50px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   font-size: 11px;
-  color: #0b8d12;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
 }
 
 .calendar-columns {
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
 }
 
 .day-column {
   position: relative;
-  border-right: 1px solid #2c750a;
+  border-left: 1px solid #dcedc8;
 }
 
 .grid-cell {
   height: 50px;
-  border-bottom: 1px solid #115f0a;
+  border-bottom: 1px solid #e8f5e9;
 }
 
-.grid-cell.highlight {
-  background: rgba(0, 122, 255, 0.1);
-}
-
-.highlight-block {
+.event {
   position: absolute;
-  left: 0;
-  right: 0;
-  background: rgba(0,122,255,0.12);
-  border: 2px dashed #2196f3;
-  border-radius: 6px;
-  pointer-events: none;
-  z-index: 10;
+  left: 4px;
+  right: 4px;
+  padding: 6px;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 12px;
+  box-sizing: border-box;
 }
 
-/* Hover highlight */
-.grid-cell:hover {
-  background: rgba(0, 122, 255, 0.06);
-  transition: background 0.15s ease;
+.event-title {
+  font-weight: 700;
 }
 
+.event-desc {
+  font-size: 11px;
+  opacity: 0.95;
+}
+
+.event-meta {
+  font-size: 10px;
+  margin-top: 2px;
+  opacity: 0.9;
+}
 
 .resize-handle {
   position: absolute;
@@ -374,60 +317,16 @@ function formatTime(t: string) {
   right: 0;
   height: 6px;
   cursor: row-resize;
-  z-index: 100;
 }
+.resize-handle.top { top: -3px; }
+.resize-handle.bottom { bottom: -3px; }
 
-.resize-handle.top {
-  top: -3px;
-}
-
-.resize-handle.bottom {
-  bottom: -3px;
-}
-
-
-/* Fade-out animation */
-.preview-event.fade-out {
-  opacity: 0;
-  transform: scale(0.98);
-  transition: opacity .15s ease, transform .15s ease;
-}
-
-/* 🔥 Resize handles show only on hover instead of always visible */
-.event:hover .resize-handle {
-  opacity: 1;
-}
-
-.resize-handle {
-  opacity: 0;
-  transition: opacity .15s ease;
-}
-
-
-
-
-/* Events */
-.event {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  color: #1337da;
-  padding: 4px;
-  border-radius: 6px;
-  font-size: 12px;
-  box-sizing: border-box;
-  cursor: pointer;
-}
-
-/* Drag Preview */
 .preview-event {
   position: absolute;
+  left: 4px;
+  right: 4px;
   border: 2px dashed #2196f3;
-  background: rgba(33, 150, 243, 0.15);
+  background: rgba(33,150,243,.15);
   border-radius: 6px;
-  pointer-events: none;
-  z-index: 50;
-  box-sizing: border-box;
 }
-
 </style>

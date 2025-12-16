@@ -17,7 +17,6 @@
             variant="outlined"
             hide-details
             style="min-width:220px"
-            @update:model-value="reloadSchedules"
           />
         </div>
 
@@ -45,7 +44,6 @@
             density="comfortable"
             variant="outlined"
             style="min-width:260px"
-            @update:model-value="reloadSchedules"
           />
 
           <v-select
@@ -58,7 +56,6 @@
             density="comfortable"
             variant="outlined"
             style="min-width:260px"
-            @update:model-value="reloadSchedules"
           />
 
           <v-select
@@ -71,7 +68,6 @@
             density="comfortable"
             variant="outlined"
             style="min-width:220px"
-            @update:model-value="reloadSchedules"
           />
         </div>
       </div>
@@ -171,14 +167,24 @@ const snackbar = ref({
 })
 
 /* ---------------- COMPUTED ---------------- */
+
+/**
+ * ✅ THIS IS THE MOST IMPORTANT FIX
+ * Calendar now receives FULL event objects
+ */
 const calendarEvents = computed(() =>
   scheduleStore.sorted.map(s => ({
     id: s.id,
     day: s.day,
     startSlot: s.period_start?.slot_index ?? 0,
     endSlot: s.period_end?.slot_index ?? 0,
-    subject: s.subject,
-    label: s.subject?.course_code ?? ""
+
+    subject_code: s.subject?.course_code ?? "",
+    subject_desc: s.subject?.description ?? "",
+    mode: s.mode,
+    faculty_name: s.faculty
+      ? `${s.faculty.last_name}, ${s.faculty.first_name}`
+      : null
   }))
 )
 
@@ -253,9 +259,7 @@ async function loadLists() {
 
   faculty.value = (await $supabase.from("faculty").select("*")).data || []
   rooms.value = (await $supabase.from("rooms").select("*")).data || []
-
-  periods.value =
-    (await $supabase.from("periods").select("*").order("slot_index")).data || []
+  periods.value = (await $supabase.from("periods").select("*").order("slot_index")).data || []
 }
 
 async function loadSchedules() {
@@ -273,15 +277,13 @@ async function loadSchedules() {
   await scheduleStore.load(viewMode.value, targetId, selectedTermId.value)
 }
 
-async function reloadSchedules() {
-  await loadSchedules()
-}
-
 /* ---------------- WATCHERS ---------------- */
-watch([viewMode, selectedClassId, selectedFacultyId, selectedRoomId], reloadSchedules)
-watch(selectedTermId, reloadSchedules)
+watch(
+  [viewMode, selectedClassId, selectedFacultyId, selectedRoomId, selectedTermId],
+  loadSchedules
+)
 
-/* ---------------- CALENDAR ---------------- */
+/* ---------------- CALENDAR HANDLERS ---------------- */
 function attachView(base: any) {
   const payload = { ...base }
   if (viewMode.value === "CLASS") payload.class_id = selectedClassId.value
